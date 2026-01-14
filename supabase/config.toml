@@ -1,0 +1,3 @@
+[functions.fetch-webpage]
+# Allow anyone (no JWT) to call this function.
+verify_jwt = false
