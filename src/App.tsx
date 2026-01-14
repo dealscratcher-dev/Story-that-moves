@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import TaskbarCompanion from './components/TaskbarCompanion';
 import ImmersiveReader from './components/ImmersiveReader';
 import DocumentInput from './components/DocumentInput';
@@ -14,15 +14,19 @@ function App() {
   const [activeContent, setActiveContent] = useState<ReaderState | null>(null);
 
   /**
-   * handleComplete is triggered by DocumentInput once 
-   * the Supabase fetch and FastAPI processing are done.
+   * handleComplete now supports a "progressive" load.
+   * DocumentInput calls this once with HTML, then again with the Storyboard.
    */
-  const handleComplete = (html: string, storyboard: Storyboard) => {
-    setActiveContent({
-      html,
-      storyboard
+  const handleComplete = useCallback((html: string, storyboard: Storyboard | null) => {
+    setActiveContent(prev => {
+      // If we already have content and this is just a storyboard update:
+      if (prev && prev.html === html) {
+        return { ...prev, storyboard };
+      }
+      // If this is a fresh load:
+      return { html, storyboard };
     });
-  };
+  }, []);
 
   /**
    * Resets the application state to the home screen
@@ -36,7 +40,9 @@ function App() {
       {/* 1. LAYER: MAIN VIEW */}
       <main className="h-full w-full">
         {activeContent ? (
-          /* DISPLAY MODE: Show the Immersive Reader with injected content */
+          /* DISPLAY MODE: Show the Immersive Reader. 
+             It will now show the article immediately even if storyboard is null.
+          */
           <ImmersiveReader 
             webpageHtml={activeContent.html} 
             storyboard={activeContent.storyboard} 
@@ -63,9 +69,9 @@ function App() {
       {/* 2. LAYER: GLOBAL NAVIGATION */}
       <TaskbarCompanion />
       
-      {/* Decorative Background Glow (Optional) */}
+      {/* Decorative Background Glow */}
       {!activeContent && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse" />
       )}
     </div>
   );
