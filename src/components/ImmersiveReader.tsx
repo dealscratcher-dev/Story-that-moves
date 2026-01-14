@@ -1,18 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, RotateCcw, Link, FileText, Minimize2, Loader2 } from 'lucide-react';
-import OverlayMotion from './OverlayMotion'; // Our consolidated engine
+import { useState, useEffect, useRef } from 'react';
+import { RotateCcw, Link, FileText, Minimize2, Loader2 } from 'lucide-react';
+import OverlayMotion from './OverlayMotion'; 
 import IframeScrollBridge from './IframeScrollBridge';
-import SceneOrchestrator from './SceneOrchestrator';
-import { splitIntoSegments, analyzeNarrative } from '../utils/narrativeAnalyzer';
+// REMOVED: SceneOrchestrator (Merged into motion logic)
+// REMOVED: local narrativeAnalyzer (Moving to Backend)
 import { Storyboard, StoryboardScene } from '../types/storyboard';
 import { fastapiClient } from '../services/fastapiClient';
-
-interface Segment {
-  text: string;
-  emotion: string;
-  intensity: number;
-  motion: any;
-}
 
 export default function ImmersiveReader() {
   const [inputMode, setInputMode] = useState<'text' | 'url'>('url');
@@ -20,8 +13,6 @@ export default function ImmersiveReader() {
   const [urlInput, setUrlInput] = useState('');
   const [webpageHtml, setWebpageHtml] = useState('');
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [isReading, setIsReading] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showOverlayMotion, setShowOverlayMotion] = useState(false);
@@ -33,7 +24,6 @@ export default function ImmersiveReader() {
   const [processingStatus, setProcessingStatus] = useState('');
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const timerRef = useRef<NodeJS.Timeout>();
   const hideControlsTimer = useRef<NodeJS.Timeout>();
 
   // --- Article Processing ---
@@ -69,7 +59,6 @@ export default function ImmersiveReader() {
         'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
       };
 
-      // 1. Fetch HTML for display
       const htmlResponse = await fetch(apiUrl, {
         method: 'POST',
         headers: commonHeaders,
@@ -78,7 +67,6 @@ export default function ImmersiveReader() {
       const htmlData = await htmlResponse.json();
       if (htmlResponse.ok && htmlData.html) setWebpageHtml(htmlData.html);
 
-      // 2. Fetch Clean Text for Groq analysis
       const textResponse = await fetch(apiUrl, {
         method: 'POST',
         headers: commonHeaders,
@@ -98,7 +86,6 @@ export default function ImmersiveReader() {
     }
   };
 
-  // --- Interaction Logic ---
   const handleMouseMove = () => {
     setShowControls(true);
     clearTimeout(hideControlsTimer.current);
@@ -108,18 +95,18 @@ export default function ImmersiveReader() {
   };
 
   const restart = () => {
-    setCurrentIndex(0);
     setScrollPercent(0);
     setIsReading(true);
+    // Scroll iframe back to top
+    if (iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.scrollTo(0, 0);
+    }
   };
 
   return (
     <div className="h-screen w-full relative overflow-hidden bg-slate-950 text-slate-200" onMouseMove={handleMouseMove}>
-      {/* 1. Global Background Layers */}
       <div className="absolute inset-0 bg-slate-950" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(30,41,59,0.4),transparent_100%)]" />
-
-      {/* 2. Main Content Area */}
+      
       <div className="relative z-10 h-full flex flex-col">
         {!isFullscreenView && (
           <div className="p-12 max-w-5xl mx-auto w-full">
@@ -131,7 +118,6 @@ export default function ImmersiveReader() {
         <div className={`flex-1 relative transition-all duration-1000 ${isFullscreenView ? 'p-0' : 'p-12 pb-24'}`}>
           <div className={`w-full h-full bg-slate-900/20 backdrop-blur-md border border-slate-800/50 flex flex-col overflow-hidden shadow-2xl ${isFullscreenView ? '' : 'rounded-3xl'}`}>
             
-            {/* Input Overlay (only shown if no webpage is loaded) */}
             {!webpageHtml && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center">
                 <div className="max-w-md w-full space-y-6">
@@ -166,7 +152,6 @@ export default function ImmersiveReader() {
               </div>
             )}
 
-            {/* Iframe Viewport */}
             {webpageHtml && (
               <div className="relative w-full h-full bg-white">
                 <iframe 
@@ -176,29 +161,24 @@ export default function ImmersiveReader() {
                   sandbox="allow-same-origin allow-scripts" 
                 />
                 
-                {/* Visual Intelligence Layers */}
-                {storyboard && (
-                  <>
-                    <IframeScrollBridge 
-                      iframeRef={iframeRef} 
-                      onScrollChange={data => setScrollPercent(data.scrollPercent)} 
-                      isActive={showOverlayMotion} 
-                    />
-                    <SceneOrchestrator 
-                      waypoints={storyboard.waypoints} 
-                      scrollPercent={scrollPercent} 
-                      onActiveSceneChange={setActiveScene} 
-                    />
-                    <OverlayMotion 
-                      isActive={showOverlayMotion}
-                      motionType={activeScene?.motionType || 'drift'}
-                      intensity={activeScene?.intensity || 0.5}
-                      emotion={activeScene?.emotion || 'neutral'}
-                    />
-                  </>
-                )}
+                {/* Integration of Scrolling and Motion */}
+                <IframeScrollBridge 
+                  url={urlInput}
+                  onSceneUpdate={(data) => {
+                    setActiveScene(data.scene);
+                    // intensity and emotion are derived from the active scene
+                  }}
+                  onScroll={(percent) => setScrollPercent(percent)}
+                />
 
-                {/* Processing Shield */}
+                <OverlayMotion 
+                  isActive={showOverlayMotion}
+                  motionType={activeScene?.type === 'action' ? 'pulse' : 'drift'}
+                  intensity={activeScene?.intensity || 0.5}
+                  emotion={activeScene?.emotion || 'neutral'}
+                  scene={activeScene}
+                />
+
                 {isProcessing && (
                   <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center z-[60]">
                     <Loader2 className="w-8 h-8 text-white animate-spin mb-4 opacity-50" />
@@ -211,7 +191,7 @@ export default function ImmersiveReader() {
         </div>
       </div>
 
-      {/* 3. Global HUD Controls */}
+      {/* Global HUD Controls */}
       <div className={`fixed bottom-10 left-0 right-0 z-[70] transition-all duration-1000 px-6 ${showControls && webpageHtml ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}>
         <div className="max-w-xl mx-auto bg-black/40 backdrop-blur-3xl border border-white/10 rounded-full p-3 flex items-center gap-6 shadow-2xl">
           <button onClick={restart} className="ml-4 text-slate-400 hover:text-white transition-colors"><RotateCcw size={18} /></button>
@@ -238,7 +218,6 @@ export default function ImmersiveReader() {
         </div>
       </div>
 
-      {/* Fullscreen Toggle for when in reading mode */}
       {isFullscreenView && webpageHtml && (
         <button 
           onClick={() => setIsFullscreenView(false)} 
