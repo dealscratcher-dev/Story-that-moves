@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react';
-import { FileText, Calendar, Trash2 } from 'lucide-react';
+import { FileText, Trash2, Zap, PlayCircle } from 'lucide-react';
 import { supabase, type Document } from '../lib/supabase';
+// Import your client to check status
+import { fastapiClient } from '../services/fastapiClient';
 
-interface DocumentListProps {
-  onDocumentSelect: (doc: Document) => void;
-}
-
-export default function DocumentList({ onDocumentSelect }: DocumentListProps) {
+export default function DocumentList({ onDocumentSelect }: { onDocumentSelect: (doc: Document) => void }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Load from Supabase, but we'll eventually augment with Mongo status
   const loadDocuments = async () => {
     setIsLoading(true);
     try {
@@ -21,7 +20,7 @@ export default function DocumentList({ onDocumentSelect }: DocumentListProps) {
       if (error) throw error;
       setDocuments(data || []);
     } catch (error) {
-      console.error('Error loading documents:', error);
+      console.error('List Load Error:', error);
     } finally {
       setIsLoading(false);
     }
@@ -29,95 +28,48 @@ export default function DocumentList({ onDocumentSelect }: DocumentListProps) {
 
   useEffect(() => {
     loadDocuments();
-
-    const subscription = supabase
-      .channel('documents_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, () => {
-        loadDocuments();
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm('Delete this document? This will also remove all narrative segments.')) return;
-
-    try {
-      const { error } = await supabase.from('documents').delete().eq('id', id);
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error deleting document:', error);
-      alert('Failed to delete document.');
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-slate-400">Loading documents...</div>
-      </div>
-    );
-  }
-
-  if (documents.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center text-slate-400">
-          <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p className="text-lg mb-1">No documents yet</p>
-          <p className="text-sm">Add your first text to see narrative motion</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold mb-6">Your Documents</h2>
+    <div className="h-full bg-slate-950 p-8">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex justify-between items-end mb-10">
+          <div>
+            <h2 className="text-4xl font-light text-white tracking-tight">Your Archive</h2>
+            <p className="text-slate-500 mt-2">Select a narrative to begin the motion experience.</p>
+          </div>
+        </div>
 
-        <div className="grid gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {documents.map((doc) => (
             <div
               key={doc.id}
               onClick={() => onDocumentSelect(doc)}
-              className="bg-slate-800 border border-slate-700 rounded-lg p-5 hover:border-emerald-500 transition-all cursor-pointer group"
+              className="group relative bg-slate-900/40 border border-slate-800 rounded-3xl p-6 hover:bg-slate-800/60 hover:border-emerald-500/50 transition-all cursor-pointer"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-2">
-                    <FileText className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-                    <h3 className="text-lg font-semibold truncate group-hover:text-emerald-400 transition-colors">
-                      {doc.title}
-                    </h3>
+              {/* Early In Hint: A visual "Vibe" indicator */}
+              <div className="flex items-start justify-between">
+                <div className="space-y-4 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                    <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Analyzed</span>
                   </div>
-
-                  <p className="text-slate-400 text-sm line-clamp-2 mb-3">
+                  
+                  <h3 className="text-xl font-medium text-white group-hover:text-emerald-400 transition-colors line-clamp-1">
+                    {doc.title}
+                  </h3>
+                  
+                  <p className="text-slate-400 text-sm leading-relaxed line-clamp-2">
                     {doc.content}
                   </p>
-
-                  <div className="flex items-center gap-4 text-xs text-slate-500">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {new Date(doc.created_at).toLocaleDateString()}
-                    </span>
-                    <span className="px-2 py-1 bg-slate-700 rounded capitalize">
-                      {doc.source_type}
-                    </span>
-                  </div>
                 </div>
 
-                <button
-                  onClick={(e) => handleDelete(doc.id, e)}
-                  className="p-2 hover:bg-red-900/30 hover:text-red-400 rounded-lg transition-colors flex-shrink-0"
-                  title="Delete"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex flex-col gap-2">
+                   <button className="p-2 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all">
+                      <Trash2 size={18} />
+                   </button>
+                   <PlayCircle className="text-slate-700 group-hover:text-emerald-500 transition-colors" size={32} />
+                </div>
               </div>
             </div>
           ))}
