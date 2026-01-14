@@ -1,6 +1,7 @@
 import { Storyboard, ProcessingJob } from '../types/storyboard';
 
-const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_URL || 'http://localhost:8000';
+// Pull the Railway URL from your .env.VITE_API_BASE_URL
+const FASTAPI_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 class FastAPIClient {
   private baseUrl: string;
@@ -10,11 +11,11 @@ class FastAPIClient {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    // Ensure no double slashes
+    const url = `${this.baseUrl.replace(/\/$/, '')}${endpoint}`;
     
-    // Add a simple timeout to the fetch request
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const id = setTimeout(() => controller.abort(), 20000); // Increased to 20s for slow LLM cold starts
 
     try {
       const response = await fetch(url, {
@@ -34,50 +35,71 @@ class FastAPIClient {
 
       return response.json();
     } catch (err: any) {
-      if (err.name === 'AbortError') throw new Error('Request timed out');
+      if (err.name === 'AbortError') throw new Error('Request timed out connecting to Railway');
       throw err;
     }
   }
 
-  // Tells FastAPI to check Mongo first, then Groq
-  async processArticle(url: string, text: string): Promise<ProcessingJob> {
-    return this.request<ProcessingJob>('/api/process-article', {
+  /**
+   * 1. Kick off the Chaos Engine
+   */
+  async processArticle(text: string, url: string = ''): Promise<{ job_id: string }> {
+    return this.request<{ job_id: string }>('/process', {
       method: 'POST',
       body: JSON.stringify({ 
-        url, 
-        text,
-        db_context: "Story-that-moves" // Signal to backend which DB to use
+        text, 
+        url,
+        style: "cinematic" 
       }),
     });
   }
 
+  /**
+   * 2. Check the status of a specific job
+   */
   async getJobStatus(jobId: string): Promise<ProcessingJob> {
-    return this.request<ProcessingJob>(`/api/job/${jobId}`);
+    return this.request<ProcessingJob>(`/jobs/${jobId}`);
   }
 
+  /**
+   * 3. Fetch the final visual storyboard data
+   */
   async getStoryboard(articleId: string): Promise<Storyboard> {
-    return this.request<Storyboard>(`/api/storyboard/${articleId}`);
+    return this.request<Storyboard>(`/storyboard/${articleId}`);
   }
 
-  // Polling logic to wait for the Groq LLM to finish thinking
-  async pollJobCompletion(
+  /**
+   * 4. Orchestrator: Polls until the backend saves to Mongo, then fetches the result
+   */
+  async pollAndFetch(
     jobId: string,
-    onProgress?: (job: ProcessingJob) => void
-  ): Promise<ProcessingJob> {
+    onProgress?: (progress: number) => void
+  ): Promise<Storyboard> {
     let attempts = 0;
-    const maxAttempts = 40;
+    const maxAttempts = 60; // 2 minutes max (LLMs can be slow)
 
     return new Promise((resolve, reject) => {
       const poll = async () => {
         try {
           const job = await this.getJobStatus(jobId);
-          if (onProgress) onProgress(job);
-
-          if (job.status === 'completed') return resolve(job);
-          if (job.status === 'failed') return reject(new Error(job.error));
-
-          if (++attempts >= maxAttempts) return reject(new Error('Analysis timed out'));
           
+          if (onProgress) onProgress(job.progress || 0);
+
+          // MATCHING: Our backend returns "complete"
+          if (job.status === 'complete' && job.article_id) {
+            const finalStoryboard = await this.getStoryboard(job.article_id);
+            return resolve(finalStoryboard);
+          }
+
+          if (job.status === 'failed') {
+            return reject(new Error(job.error || 'The Chaos Engine failed to expand this story.'));
+          }
+
+          if (++attempts >= maxAttempts) {
+            return reject(new Error('The director took too long to think. Please try again.'));
+          }
+          
+          // Poll every 2 seconds
           setTimeout(poll, 2000);
         } catch (error) {
           reject(error);
