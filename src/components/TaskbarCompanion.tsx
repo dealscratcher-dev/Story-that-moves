@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { BookOpen, Plus, List, Play, Minimize2, Maximize2, Layers } from 'lucide-react';
+import { BookOpen, Plus, List, Play, Minimize2, Maximize2, Sparkles } from 'lucide-react';
 import DocumentInput from './DocumentInput';
 import DocumentList from './DocumentList';
-import NarrativeReader from './NarrativeReader';
+import ImmersiveReader from './ImmersiveReader'; // NEW
 import SplitViewReader from './SplitViewReader';
 import type { Document } from '../lib/supabase';
 
-type View = 'list' | 'input' | 'reader' | 'split';
+type View = 'list' | 'input' | 'reader' | 'studio';
 
 export default function TaskbarCompanion() {
-  const [view, setView] = useState<View>('split');
+  const [view, setView] = useState<View>('list');
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
 
@@ -19,97 +19,55 @@ export default function TaskbarCompanion() {
     setIsExpanded(true);
   };
 
-  const handleDocumentCreated = () => {
-    setView('list');
-  };
-
   return (
     <div
-      className={`fixed bottom-0 left-1/2 -translate-x-1/2 bg-slate-900 text-white shadow-2xl transition-all duration-300 rounded-t-2xl border-t-2 border-slate-700 ${
-        isExpanded ? 'w-[95vw] h-[85vh]' : 'w-[600px] h-[60px]'
-      }`}
+      className={`fixed bottom-0 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-xl text-white shadow-2xl transition-all duration-500 rounded-t-3xl border-t border-white/10 ${
+        isExpanded ? 'w-[98vw] h-[92vh] mb-2' : 'w-[500px] h-[64px] mb-4 rounded-full border'
+      } z-[100]`}
     >
-      <div className="flex items-center justify-between px-4 h-[60px] border-b border-slate-700">
+      <div className="flex items-center justify-between px-6 h-[64px]">
         <div className="flex items-center gap-3">
-          <BookOpen className="w-5 h-5 text-emerald-400" />
-          <span className="font-semibold text-lg tracking-tight">StitchQylt</span>
-          <span className="text-xs text-slate-400 hidden sm:inline">Story Narration Layer</span>
+          <div className="bg-emerald-500 p-1.5 rounded-lg">
+            <Sparkles className="w-4 h-4 text-black" />
+          </div>
+          <span className="font-bold tracking-tighter text-xl">STITCH</span>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => { setView('split'); setIsExpanded(true); }}
-            className={`p-2 rounded-lg transition-colors ${
-              view === 'split' ? 'bg-emerald-600' : 'hover:bg-slate-700'
-            }`}
-            title="Live Companion Mode"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => { setView('input'); setIsExpanded(true); }}
-            className={`p-2 rounded-lg transition-colors ${
-              view === 'input' ? 'bg-emerald-600' : 'hover:bg-slate-700'
-            }`}
-            title="Add Document"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => { setView('list'); setIsExpanded(true); }}
-            className={`p-2 rounded-lg transition-colors ${
-              view === 'list' ? 'bg-emerald-600' : 'hover:bg-slate-700'
-            }`}
-            title="Document Library"
-          >
-            <List className="w-4 h-4" />
-          </button>
-
+        <div className="flex items-center gap-1 bg-white/5 p-1 rounded-full">
+          <TabButton active={view === 'input'} onClick={() => { setView('input'); setIsExpanded(true); }} icon={<Plus size={18}/>} />
+          <TabButton active={view === 'list'} onClick={() => { setView('list'); setIsExpanded(true); }} icon={<List size={18}/>} />
           {selectedDocument && (
-            <button
-              onClick={() => { setView('reader'); setIsExpanded(true); }}
-              className={`p-2 rounded-lg transition-colors ${
-                view === 'reader' ? 'bg-emerald-600' : 'hover:bg-slate-700'
-              }`}
-              title="Immersive Reader"
-            >
-              <Play className="w-4 h-4" />
-            </button>
+            <TabButton active={view === 'reader'} onClick={() => { setView('reader'); setIsExpanded(true); }} icon={<Play size={18}/>} />
           )}
-
-          <div className="w-px h-6 bg-slate-700 mx-1" />
-
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-            title={isExpanded ? 'Minimize' : 'Expand'}
-          >
-            {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-          </button>
+          <div className="w-px h-4 bg-white/10 mx-2" />
+          <TabButton active={false} onClick={() => setIsExpanded(!isExpanded)} icon={isExpanded ? <Minimize2 size={18}/> : <Maximize2 size={18}/>} />
         </div>
       </div>
 
       {isExpanded && (
-        <div className="h-[calc(100%-60px)] overflow-hidden">
-          {view === 'split' && (
-            <SplitViewReader />
-          )}
-
-          {view === 'list' && (
-            <DocumentList onDocumentSelect={handleDocumentSelect} />
-          )}
-
-          {view === 'input' && (
-            <DocumentInput onDocumentCreated={handleDocumentCreated} />
-          )}
-
+        <div className="h-[calc(100%-64px)] overflow-hidden rounded-b-3xl">
+          {view === 'list' && <DocumentList onDocumentSelect={handleDocumentSelect} />}
+          {view === 'input' && <DocumentInput onDocumentCreated={() => setView('list')} />}
           {view === 'reader' && selectedDocument && (
-            <NarrativeReader document={selectedDocument} />
+            <ImmersiveReader 
+              url={`local://${selectedDocument.id}`} // Or actual URL if stored
+              title={selectedDocument.title} 
+            />
           )}
+          {view === 'studio' && <SplitViewReader />}
         </div>
       )}
     </div>
+  );
+}
+
+function TabButton({ active, onClick, icon }: { active: boolean, onClick: () => void, icon: any }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`p-2.5 rounded-full transition-all ${active ? 'bg-white text-black' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+    >
+      {icon}
+    </button>
   );
 }
