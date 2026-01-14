@@ -1,87 +1,91 @@
-import { useState } from 'react';
-import { FileText, Loader2, Sparkles } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { fastapiClient } from '../services/fastapiClient';
+import React, { useState } from 'react';
+import { Link, FileText, ChevronRight, Loader2 } from 'lucide-react';
 
-export default function DocumentInput({ onDocumentCreated }: { onDocumentCreated: () => void }) {
+interface DocumentInputProps {
+  onSelect: (story: { url: string; title: string }) => void;
+}
+
+export default function DocumentInput({ onSelect }: DocumentInputProps) {
+  const [mode, setMode] = useState<'url' | 'text'>('url');
+  const [inputValue, setInputValue] = useState('');
   const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
-
-    setIsProcessing(true);
-
-    try {
-      // 1. Save the "Raw" content to Supabase
-      const { data: document, error: docError } = await supabase
-        .from('documents')
-        .insert({
-          title: title.trim(),
-          content: content.trim(),
-          source_type: 'manual',
-        })
-        .select().single();
-
-      if (docError) throw docError;
-
-      // 2. Trigger the FastAPI "Brain" to analyze it
-      // This is much better than local splitIntoSegments()
-      const job = await fastapiClient.processArticle(`local://${document.id}`, content.trim());
-      
-      // 3. Wait for the Storyboard to be ready
-      await fastapiClient.pollJobCompletion(job.job_id);
-
-      setTitle('');
-      setContent('');
-      onDocumentCreated();
-    } catch (error) {
-      console.error('Narrative pipeline failed:', error);
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleSubmit = () => {
+    if (!inputValue.trim()) return;
+    
+    // For URL mode, we use the URL as the title if none is provided
+    const finalTitle = title.trim() || (mode === 'url' ? 'Web Narrative' : 'New Archive');
+    onSelect({ url: inputValue, title: finalTitle });
   };
 
   return (
-    <div className="h-full bg-slate-950 p-12">
-      <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-8">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-emerald-400">
-            <Sparkles size={20} />
-            <span className="text-xs font-black uppercase tracking-widest">New Archive</span>
-          </div>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Document Title"
-            className="w-full bg-transparent text-4xl font-light text-white outline-none placeholder:opacity-20"
-          />
-        </div>
-
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Paste your prose here..."
-          className="w-full h-64 bg-slate-900/50 border border-slate-800 rounded-3xl p-8 text-lg font-light leading-relaxed text-slate-300 focus:border-emerald-500/50 outline-none transition-all resize-none"
-        />
-
-        <button
-          type="submit"
-          disabled={isProcessing}
-          className="group relative w-full py-4 bg-white text-black font-bold rounded-full overflow-hidden transition-transform active:scale-95 disabled:opacity-50"
+    <div className="w-full max-w-xl mx-auto space-y-8 animate-fadeSlideIn">
+      {/* Mode Toggle */}
+      <div className="flex justify-center gap-4">
+        <button 
+          onClick={() => setMode('url')}
+          className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all ${mode === 'url' ? 'bg-white text-black' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
         >
-          {isProcessing ? (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="animate-spin" size={18} />
-              <span>Analyzing Narrative Depth...</span>
+          <Link size={16} /> <span className="text-xs font-bold uppercase tracking-widest">Link</span>
+        </button>
+        <button 
+          onClick={() => setMode('text')}
+          className={`flex items-center gap-2 px-6 py-2 rounded-full transition-all ${mode === 'text' ? 'bg-white text-black' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+        >
+          <FileText size={16} /> <span className="text-xs font-bold uppercase tracking-widest">Prose</span>
+        </button>
+      </div>
+
+      <div className="space-y-6">
+        {mode === 'url' ? (
+          <div className="space-y-4">
+            <div className="relative group">
+              <input
+                type="url"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder="Paste narrative URL here..."
+                className="w-full bg-white/5 border-b-2 border-white/20 p-6 text-xl text-white placeholder-white/20 focus:outline-none focus:border-white transition-colors text-center font-light"
+                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+              />
+              <div className="absolute bottom-0 left-0 h-0.5 bg-white transition-all duration-500 w-0 group-focus-within:w-full" />
             </div>
+            <p className="text-[10px] text-center text-slate-500 uppercase tracking-[0.3em]">Supports most article and blog formats</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Document Title"
+              className="w-full bg-transparent border-none text-2xl font-light text-white placeholder-slate-700 focus:outline-none"
+            />
+            <textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="Paste your prose here..."
+              className="w-full h-48 bg-white/5 rounded-2xl p-6 text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none leading-relaxed"
+            />
+          </div>
+        )}
+
+        {/* The Action Button */}
+        <button
+          onClick={handleSubmit}
+          disabled={!inputValue.trim() || isValidating}
+          className="group w-full py-5 bg-white text-black rounded-2xl font-black text-xs uppercase tracking-[0.5em] flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-[0.98] disabled:opacity-20 disabled:grayscale"
+        >
+          {isValidating ? (
+            <Loader2 className="animate-spin" size={18} />
           ) : (
-            <span>Commit to Archive</span>
+            <>
+              Initialize Experience <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            </>
           )}
         </button>
-      </form>
+      </div>
     </div>
   );
 }
