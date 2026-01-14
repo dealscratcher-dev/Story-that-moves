@@ -1,22 +1,74 @@
 import React, { useState } from 'react';
 import { Link, FileText, ChevronRight, Loader2 } from 'lucide-react';
+import { fastapiClient } from '../services/fastapiClient';
 
 interface DocumentInputProps {
-  onSelect: (story: { url: string; title: string }) => void;
+  // onComplete now passes the final HTML and Storyboard to the App
+  onComplete: (html: string, storyboard: any) => void;
 }
 
-export default function DocumentInput({ onSelect }: DocumentInputProps) {
+export default function DocumentInput({ onComplete }: DocumentInputProps) {
   const [mode, setMode] = useState<'url' | 'text'>('url');
   const [inputValue, setInputValue] = useState('');
-  const [title, setTitle] = useState('');
   const [isValidating, setIsValidating] = useState(false);
+  const [status, setStatus] = useState('');
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!inputValue.trim()) return;
     
-    // For URL mode, we use the URL as the title if none is provided
-    const finalTitle = title.trim() || (mode === 'url' ? 'Web Narrative' : 'New Archive');
-    onSelect({ url: inputValue, title: finalTitle });
+    setIsValidating(true);
+    setStatus('Fetching Web Content...');
+
+    try {
+      let finalHtml = '';
+      let textContent = '';
+
+      if (mode === 'url') {
+        // 1. Fetch HTML and Text via Supabase Edge Function
+        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-webpage`;
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        };
+
+        const htmlRes = await fetch(apiUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ url: inputValue, mode: 'html' }),
+        });
+        const htmlData = await htmlRes.json();
+        finalHtml = htmlData.html;
+
+        const textRes = await fetch(apiUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ url: inputValue }),
+        });
+        const textData = await textRes.json();
+        textContent = textData.text;
+      } else {
+        // Text mode: Wrap input in basic HTML structure
+        textContent = inputValue;
+        finalHtml = `<html><body style="font-family: sans-serif; padding: 40px; line-height: 1.6;">${inputValue}</body></html>`;
+      }
+
+      // 2. Process Narrative via FastAPI
+      setStatus('Analyzing Narrative...');
+      const job = await fastapiClient.processArticle(inputValue, textContent);
+      const completedJob = await fastapiClient.pollJobCompletion(job.job_id, (j) => {
+        if (j.progress) setStatus(`Synthesizing Visuals: ${j.progress}%`);
+      });
+      
+      if (completedJob.article_id) {
+        const storyboard = await fastapiClient.getStoryboard(completedJob.article_id);
+        // 3. Send everything to the parent to open the Reader
+        onComplete(finalHtml, storyboard);
+      }
+    } catch (e) {
+      console.error('Initialization failed:', e);
+      setStatus('Error: Could not reach services');
+      setTimeout(() => setIsValidating(false), 2000);
+    }
   };
 
   return (
@@ -40,45 +92,35 @@ export default function DocumentInput({ onSelect }: DocumentInputProps) {
       <div className="space-y-6">
         {mode === 'url' ? (
           <div className="space-y-4">
-            <div className="relative group">
-              <input
-                type="url"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Paste narrative URL here..."
-                className="w-full bg-white/5 border-b-2 border-white/20 p-6 text-xl text-white placeholder-white/20 focus:outline-none focus:border-white transition-colors text-center font-light"
-                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-              />
-              <div className="absolute bottom-0 left-0 h-0.5 bg-white transition-all duration-500 w-0 group-focus-within:w-full" />
-            </div>
-            <p className="text-[10px] text-center text-slate-500 uppercase tracking-[0.3em]">Supports most article and blog formats</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
             <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Document Title"
-              className="w-full bg-transparent border-none text-2xl font-light text-white placeholder-slate-700 focus:outline-none"
-            />
-            <textarea
+              type="url"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Paste your prose here..."
-              className="w-full h-48 bg-white/5 rounded-2xl p-6 text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none leading-relaxed"
+              placeholder="Paste article URL..."
+              className="w-full bg-white/5 border-b-2 border-white/20 p-6 text-xl text-white placeholder-white/20 focus:outline-none focus:border-white transition-colors text-center font-light"
+              disabled={isValidating}
             />
           </div>
+        ) : (
+          <textarea
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="Paste your prose here..."
+            className="w-full h-48 bg-white/5 rounded-2xl p-6 text-white placeholder-slate-700 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none leading-relaxed"
+            disabled={isValidating}
+          />
         )}
 
-        {/* The Action Button */}
         <button
           onClick={handleSubmit}
           disabled={!inputValue.trim() || isValidating}
-          className="group w-full py-5 bg-white text-black rounded-2xl font-black text-xs uppercase tracking-[0.5em] flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-[0.98] disabled:opacity-20 disabled:grayscale"
+          className="group w-full py-5 bg-white text-black rounded-2xl font-black text-xs uppercase tracking-[0.5em] flex items-center justify-center gap-2 hover:bg-emerald-400 transition-all active:scale-[0.98] disabled:opacity-50"
         >
           {isValidating ? (
-            <Loader2 className="animate-spin" size={18} />
+            <>
+              <Loader2 className="animate-spin" size={18} />
+              <span className="ml-2">{status}</span>
+            </>
           ) : (
             <>
               Initialize Experience <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
