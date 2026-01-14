@@ -6,6 +6,7 @@ interface OverlayMotionProps {
   intensity: number;
   emotion: string;
   isActive: boolean;
+  onZonesUpdate?: (zones: SafeZone[], scrollY: number) => void;
 }
 
 interface SafeZone {
@@ -15,9 +16,12 @@ interface SafeZone {
   height: number;
 }
 
-export default function OverlayMotion({ motionType, intensity, emotion, isActive }: OverlayMotionProps) {
+export default function OverlayMotion({ motionType, intensity, emotion, isActive, onZonesUpdate }: OverlayMotionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
+  const lastScrollY = useRef(0);
+  const scrollThreshold = 80; // Sends data to pathfinder every 80px
+  
   const [safeZones, setSafeZones] = useState<SafeZone[]>([]);
   const particlesRef = useRef<Array<{
     x: number;
@@ -26,168 +30,155 @@ export default function OverlayMotion({ motionType, intensity, emotion, isActive
     vy: number;
     size: number;
     opacity: number;
-    hue: number;
+    phase: number; // For wave/pulse patterns
   }>>([]);
 
-  const emotionColors: Record<string, number> = {
-    calm: 200,
-    tense: 0,
-    exciting: 45,
-    sad: 220,
-    joyful: 120,
-    mysterious: 280,
-    neutral: 240
+  // High-end monochromatic tones based on emotion
+  const toneMap: Record<string, string> = {
+    calm: '200, 210, 220',      // Slate
+    tense: '255, 255, 255',     // White
+    exciting: '255, 255, 255',  // White
+    sad: '100, 116, 139',       // Deep Gray
+    joyful: '248, 250, 252',    // Silver
+    mysterious: '148, 163, 184',// Muted Slate
+    neutral: '200, 200, 200'    // Gray
   };
 
+  // Logic to define the 'White Space' of the article
+  const detectSafeZones = (): SafeZone[] => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    return [
+      { x: 0, y: 0, width: w * 0.12, height: h },        // Left Margin
+      { x: w * 0.88, y: 0, width: w * 0.12, height: h }, // Right Margin
+      { x: 0, y: 0, width: w, height: h * 0.08 },        // Top Header
+      { x: 0, y: h * 0.92, width: w, height: h * 0.08 }  // Footer
+    ];
+  };
+
+  // Scroll Radar: Detects movement and notifies the system
   useEffect(() => {
-    const detectSafeZones = () => {
-      const zones: SafeZone[] = [];
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      const leftMargin = { x: 0, y: 0, width: viewportWidth * 0.1, height: viewportHeight };
-      const rightMargin = { x: viewportWidth * 0.9, y: 0, width: viewportWidth * 0.1, height: viewportHeight };
-      const topMargin = { x: 0, y: 0, width: viewportWidth, height: viewportHeight * 0.08 };
-      const bottomMargin = { x: 0, y: viewportHeight * 0.92, width: viewportWidth, height: viewportHeight * 0.08 };
-
-      zones.push(leftMargin, rightMargin, topMargin, bottomMargin);
-
-      return zones;
+    const handleScroll = () => {
+      const currentScroll = window.scrollY;
+      if (Math.abs(currentScroll - lastScrollY.current) > scrollThreshold) {
+        lastScrollY.current = currentScroll;
+        const freshZones = detectSafeZones();
+        setSafeZones(freshZones);
+        if (onZonesUpdate) onZonesUpdate(freshZones, currentScroll);
+      }
     };
 
+    window.addEventListener('scroll', handleScroll, { passive: true });
     setSafeZones(detectSafeZones());
-
-    const handleResize = () => {
-      setSafeZones(detectSafeZones());
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [onZonesUpdate]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !isActive) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
 
     const handleResize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      setSafeZones(detectSafeZones());
     };
+    
     window.addEventListener('resize', handleResize);
+    handleResize();
 
-    const particleCount = Math.floor(20 * intensity);
+    // Initialize particles specifically in Safe Zones
     if (particlesRef.current.length === 0) {
-      particlesRef.current = Array.from({ length: particleCount }, () => {
+      const count = Math.floor(25 * intensity);
+      particlesRef.current = Array.from({ length: count }, () => {
         const zone = safeZones[Math.floor(Math.random() * safeZones.length)];
         return {
           x: zone ? zone.x + Math.random() * zone.width : Math.random() * canvas.width,
           y: zone ? zone.y + Math.random() * zone.height : Math.random() * canvas.height,
-          vx: (Math.random() - 0.5) * intensity * 0.5,
-          vy: (Math.random() - 0.5) * intensity * 0.5,
-          size: Math.random() * 3 + 1,
-          opacity: Math.random() * 0.3 + 0.1,
-          hue: emotionColors[emotion] || 240
+          vx: (Math.random() - 0.5) * intensity * 1.5,
+          vy: (Math.random() - 0.5) * intensity * 1.5,
+          size: Math.random() * 2 + 1,
+          opacity: Math.random() * 0.4 + 0.1,
+          phase: Math.random() * Math.PI * 2
         };
       });
     }
 
     let time = 0;
+    const rgb = toneMap[emotion] || '255, 255, 255';
 
     const animate = () => {
       if (!ctx) return;
-
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       time += 0.016;
 
-      const motionEffects: Record<MotionType, () => void> = {
-        breathe: () => {
-          const breathe = Math.sin(time * 0.8) * intensity;
-          particlesRef.current.forEach(particle => {
-            const scale = 1 + breathe * 0.05;
-            ctx.fillStyle = `hsla(${particle.hue}, 70%, 60%, ${particle.opacity * (1 + breathe * 0.2)})`;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.size * scale, 0, Math.PI * 2);
-            ctx.fill();
-          });
+      const motionEffects: Record<MotionType, (p: any, i: number) => void> = {
+        breathe: (p) => {
+          const breathe = Math.sin(time * 0.8 + p.phase) * intensity;
+          ctx.fillStyle = `rgba(${rgb}, ${p.opacity * (1 + breathe * 0.3)})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * (1 + breathe * 0.2), 0, Math.PI * 2);
+          ctx.fill();
         },
 
-        pulse: () => {
-          const pulse = Math.abs(Math.sin(time * 2)) * intensity;
-          particlesRef.current.forEach(particle => {
-            ctx.fillStyle = `hsla(${particle.hue}, 70%, ${50 + pulse * 20}%, ${particle.opacity * (0.8 + pulse * 0.5)})`;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.size * (1 + pulse * 0.3), 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.shadowBlur = pulse * 20;
-            ctx.shadowColor = `hsl(${particle.hue}, 70%, 60%)`;
-          });
+        pulse: (p) => {
+          const pulse = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
+          ctx.fillStyle = `rgba(${rgb}, ${p.opacity * (0.8 + pulse * 0.5)})`;
+          ctx.shadowBlur = pulse * 15;
+          ctx.shadowColor = `rgba(${rgb}, 0.5)`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * (1 + pulse * 0.4), 0, Math.PI * 2);
+          ctx.fill();
           ctx.shadowBlur = 0;
         },
 
-        wave: () => {
-          particlesRef.current.forEach((particle, i) => {
-            const wave = Math.sin(time * 3 + i * 0.5) * intensity;
-            const offsetY = wave * 10;
-
-            ctx.fillStyle = `hsla(${particle.hue}, 70%, 60%, ${particle.opacity})`;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y + offsetY, particle.size, 0, Math.PI * 2);
-            ctx.fill();
-          });
+        wave: (p, i) => {
+          const wave = Math.sin(time * 3 + i * 0.2) * intensity;
+          ctx.fillStyle = `rgba(${rgb}, ${p.opacity})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y + (wave * 15), p.size, 0, Math.PI * 2);
+          ctx.fill();
         },
 
-        drift: () => {
-          particlesRef.current.forEach(particle => {
-            particle.y += particle.vy * intensity * 0.3;
-            particle.x += Math.sin(time + particle.y * 0.01) * 0.5;
-
-            if (particle.y > canvas.height) particle.y = 0;
-            if (particle.y < 0) particle.y = canvas.height;
-
-            ctx.fillStyle = `hsla(${particle.hue}, 70%, 60%, ${particle.opacity})`;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-            ctx.fill();
-          });
+        drift: (p) => {
+          p.y += p.vy * 0.5;
+          p.x += Math.sin(time + p.phase) * 0.5;
+          // Loop particles back to screen
+          if (p.y > canvas.height) p.y = 0;
+          if (p.y < 0) p.y = canvas.height;
+          
+          ctx.fillStyle = `rgba(${rgb}, ${p.opacity})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
         },
 
-        shift: () => {
-          particlesRef.current.forEach(particle => {
-            particle.x += particle.vx * intensity * 0.2;
-            particle.y += particle.vy * intensity * 0.2;
+        shift: (p) => {
+          p.x += p.vx * 0.8;
+          p.y += p.vy * 0.8;
 
-            const inSafeZone = safeZones.some(zone =>
-              particle.x >= zone.x && particle.x <= zone.x + zone.width &&
-              particle.y >= zone.y && particle.y <= zone.y + zone.height
-            );
+          // Stay in safe zones logic
+          const inSafeZone = safeZones.some(zone =>
+            p.x >= zone.x && p.x <= zone.x + zone.width &&
+            p.y >= zone.y && p.y <= zone.y + zone.height
+          );
 
-            if (!inSafeZone || particle.x < 0 || particle.x > canvas.width || particle.y < 0 || particle.y > canvas.height) {
-              const zone = safeZones[Math.floor(Math.random() * safeZones.length)];
-              particle.x = zone.x + Math.random() * zone.width;
-              particle.y = zone.y + Math.random() * zone.height;
-            }
+          if (!inSafeZone || p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+            const zone = safeZones[Math.floor(Math.random() * safeZones.length)];
+            p.x = zone.x + Math.random() * zone.width;
+            p.y = zone.y + Math.random() * zone.height;
+          }
 
-            ctx.fillStyle = `hsla(${particle.hue}, 70%, 60%, ${particle.opacity})`;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-            ctx.fill();
-          });
+          ctx.fillStyle = `rgba(${rgb}, ${p.opacity})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
         }
       };
 
-      motionEffects[motionType]();
-
-      safeZones.forEach(zone => {
-        ctx.strokeStyle = 'rgba(100, 100, 255, 0.05)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(zone.x, zone.y, zone.width, zone.height);
+      particlesRef.current.forEach((p, i) => {
+        motionEffects[motionType](p, i);
       });
 
       animationRef.current = requestAnimationFrame(animate);
@@ -196,9 +187,7 @@ export default function OverlayMotion({ motionType, intensity, emotion, isActive
     animationRef.current = requestAnimationFrame(animate);
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
       window.removeEventListener('resize', handleResize);
     };
   }, [motionType, intensity, emotion, isActive, safeZones]);
@@ -208,10 +197,11 @@ export default function OverlayMotion({ motionType, intensity, emotion, isActive
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-50"
+      className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
       style={{
-        mixBlendMode: 'screen',
-        opacity: 0.6
+        mixBlendMode: 'plus-lighter',
+        opacity: 0.5,
+        background: 'rgba(10, 10, 12, 0.15)' // The "Ideal" Opaque Layer
       }}
     />
   );
