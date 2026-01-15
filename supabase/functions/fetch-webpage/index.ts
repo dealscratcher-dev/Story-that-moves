@@ -1,11 +1,12 @@
+// 1. Define robust CORS headers
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": "*", // Allows any origin, including your Netlify app
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  // lower-case names; this is the pattern Supabase uses in their examples
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-requested-with",
+  "Access-Control-Max-Age": "86400", // Cache preflight for 24 hours
 };
 
+// 2. Helper for consistent JSON responses
 function jsonResponse(body: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -18,11 +19,16 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 }
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight
+  // 🛡️ CRITICAL: Handle CORS preflight explicitly
+  // The browser sends OPTIONS before POST; it MUST return 200 OK with corsHeaders
   if (req.method === "OPTIONS") {
-    return new Response("ok", { status: 200, headers: corsHeaders });
+    return new Response("ok", { 
+      status: 200, 
+      headers: corsHeaders 
+    });
   }
 
+  // Only allow POST for the actual fetching logic
   if (req.method !== "POST") {
     return jsonResponse(
       { error: "Method not allowed", allowed: ["POST"] },
@@ -52,8 +58,7 @@ Deno.serve(async (req: Request) => {
   try {
     const upstream = await fetch(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; StoriesReader/1.0; +https://stitchqylt)",
+        "User-Agent": "Mozilla/5.0 (compatible; StoriesReader/1.0; +https://stitchqylt)",
       },
     });
 
@@ -76,37 +81,25 @@ Deno.serve(async (req: Request) => {
       const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
 
       let processedHtml = html
-        // remove existing <base>
         .replace(/<base[^>]*>/gi, "")
-        // inject our base so relative links work
         .replace(/<head>/i, `<head><base href="${baseUrl}">`)
-        // strip scripts completely
         .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, "")
-        // strip comments
-        .replace(/<!--[\s\S]*?-->/g, "")
-        // keep style tags but drop huge ones
+        .replace(//g, "")
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, (match) => {
-          if (match.length > 10000) return "";
+          if (match.length > 15000) return ""; // Slightly increased style limit
           return match;
         })
-        // compress whitespace a bit
         .replace(/\s+/g, " ")
         .trim();
 
-      //  ~900 KB safety cap
-      const MAX_SIZE = 900_000;
+      // Safety cap for srcDoc stability
+      const MAX_SIZE = 950_000;
       if (processedHtml.length > MAX_SIZE) {
-        const bodyMatch = processedHtml.match(
-          /<body[^>]*>([\s\S]*?)<\/body>/i,
-        );
+        const bodyMatch = processedHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
         if (bodyMatch) {
           const bodyContent = bodyMatch[1];
-          const headMatch = processedHtml.match(
-            /<head[^>]*>([\s\S]*?)<\/head>/i,
-          );
-          const head = headMatch
-            ? headMatch[0]
-            : `<head><base href="${baseUrl}"></head>`;
+          const headMatch = processedHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+          const head = headMatch ? headMatch[0] : `<head><base href="${baseUrl}"></head>`;
           processedHtml = `<!DOCTYPE html><html>${head}<body>${bodyContent}</body></html>`;
         }
       }
@@ -114,48 +107,23 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ html: processedHtml, url });
     }
 
-    // ---------- MODE: TEXT (default) ----------
+    // ---------- MODE: TEXT (standard extraction) ----------
     const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
     const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
 
-    let content = articleMatch
-      ? articleMatch[1]
-      : mainMatch
-      ? mainMatch[1]
-      : html;
-
+    let content = articleMatch ? articleMatch[1] : mainMatch ? mainMatch[1] : html;
     const paragraphs = content.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) ?? [];
 
     let text = paragraphs
       .map((p) => {
-        const cleaned = p
+        return p
           .replace(/<[^>]+>/g, "")
           .replace(/&nbsp;/g, " ")
           .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
           .trim();
-        return cleaned;
       })
       .filter((p) => p.length > 20)
       .join("\n\n");
-
-    // fallback: whole <body> if paragraphs are too weak
-    if (!text || text.length < 50) {
-      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      if (bodyMatch) {
-        text = bodyMatch[1]
-          .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, "")
-          .replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .replace(/\s+/g, " ")
-          .trim();
-      }
-    }
 
     return jsonResponse({ text, url });
   } catch (error) {
