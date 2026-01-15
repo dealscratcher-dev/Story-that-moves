@@ -1,3 +1,2 @@
-[functions.fetch-webpage]
-# Allow anyone (no JWT) to call this function.
+[functions.clever-action]
 verify_jwt = false
