@@ -19,7 +19,7 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
     if (!inputValue.trim()) return;
     
     setIsValidating(true);
-    setStatus('Fetching Content...');
+    setStatus('Stitching Content...');
 
     try {
       let finalHtml = '';
@@ -27,47 +27,42 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
 
       // --- PHASE 1: IMMEDIATE CONTENT FETCH ---
       if (mode === 'url') {
-        // 🚀 UPDATED: Pointing to the new dynamic-api endpoint
-        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dynamic-api`;
+        // 🚀 PATCHED: Updated to use the verified super-function endpoint
+        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/super-function`;
         
         const headers = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         };
 
-        // Fetch HTML for display
-        const htmlRes = await fetch(apiUrl, {
+        // Fetch processed content from Supabase Edge Function
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify({ url: inputValue, mode: 'html' }),
         });
 
-        if (!htmlRes.ok) throw new Error('Could not fetch webpage HTML');
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Could not fetch webpage');
+        }
         
-        const htmlData = await htmlRes.json();
-        finalHtml = htmlData.html;
+        const data = await response.json();
+        finalHtml = data.html;
+        // If your edge function returns both, use them; 
+        // otherwise, we use the cleaned HTML as the base for text
+        textContent = data.text || data.html.replace(/<[^>]*>?/gm, ''); 
 
-        // Fetch plain text for AI
-        const textRes = await fetch(apiUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ url: inputValue }),
-        });
-
-        if (!textRes.ok) throw new Error('Could not fetch plain text for AI');
-
-        const textData = await textRes.json();
-        textContent = textData.text;
       } else {
         textContent = inputValue;
         finalHtml = `<html><body style="font-family: sans-serif; padding: 40px; line-height: 1.6; background: #fff; color: #000;">${inputValue}</body></html>`;
       }
 
       // --- PHASE 2: INSTANT OPEN ---
-      // Open the reader immediately with HTML and a null storyboard
+      // Transition the user into the reader immediately
       onComplete(finalHtml, null);
       
-      // Reset UI state locally
+      // Reset local input state
       setIsValidating(false);
 
       // --- PHASE 3: BACKGROUND AI PROCESSING ---
@@ -78,13 +73,12 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
         if (completedJob.article_id) {
           const storyboard = await fastapiClient.getStoryboard(completedJob.article_id);
           
-          // SUCCESS: Push the storyboard to App.tsx
+          // Push the storyboard to the already-open reader
           onStoryboardReady(storyboard);
           console.log("Narrative analysis attached successfully.");
         }
       } catch (backendError) {
-        console.warn("FastAPI offline or Job failed. Reader running in basic mode.");
-        // SAFETY: Stop the loader in the reader even if AI fails
+        console.warn("AI Backend unreachable. Continuing in basic reader mode.");
         onStoryboardReady({ 
           scenes: [], 
           entities: [], 
@@ -93,10 +87,10 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
         });
       }
 
-    } catch (e) {
+    } catch (e: any) {
       console.error('Initialization failed:', e);
-      setStatus('Error: Content unreachable');
-      setTimeout(() => setIsValidating(false), 2000);
+      setStatus(e.message === 'Failed to fetch' ? 'CORS/Network Error' : 'Content unreachable');
+      setTimeout(() => setIsValidating(false), 3000);
     }
   };
 
