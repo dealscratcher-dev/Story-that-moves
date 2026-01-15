@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { RotateCcw, Loader2, Info, Zap } from 'lucide-react';
+import { RotateCcw, Loader2, Zap } from 'lucide-react';
 import OverlayMotion from './OverlayMotion'; 
 import IframeScrollBridge from './IframeScrollBridge';
 import { CanvasRenderer } from './CanvasRenderer';
@@ -62,7 +62,6 @@ export default function ImmersiveReader({
       onMouseMove={handleMouseMove}
     >
       {/* 1. LAYER: MOOD ENGINE (OverlayMotion) */}
-      {/* This creates the ambient particles and lighting based on backend emotions */}
       <OverlayMotion 
         isActive={!!webpageHtml}
         motionType={activeScene?.type === 'action' ? 'pulse' : 'drift'}
@@ -72,7 +71,6 @@ export default function ImmersiveReader({
       />
 
       {/* 2. LAYER: THE ARTICLE (The Sandboxed Environment) */}
-      {/* We apply a visual "recede" effect when the storyboard (Parallel Mode) is active */}
       <div 
         className={`relative z-10 h-full p-0 transition-all duration-1000 ease-in-out ${
           storyboard ? 'opacity-30 scale-[0.97] grayscale-[0.6] blur-[1px]' : 'opacity-100 scale-100'
@@ -89,10 +87,10 @@ export default function ImmersiveReader({
                   sandbox="allow-same-origin allow-scripts" 
                 />
                 
-                {/* Bridges the Iframe scroll events to our React state */}
+                {/* 🛡️ FIXED: Prop name changed from onScroll to onScrollChange to match Bridge */}
                 <IframeScrollBridge 
                   iframeRef={iframeRef}
-                  onScroll={(percent) => setScrollPercent(percent)}
+                  onScrollChange={(data) => setScrollPercent(data.scrollPercent)}
                   isActive={true}
                 />
               </>
@@ -106,13 +104,12 @@ export default function ImmersiveReader({
       </div>
 
       {/* 3. LAYER: PARALLEL MOTION STAGE (CanvasRenderer) */}
-      {/* This renders the characters/entities derived from the Railway backend */}
       {storyboard && (
         <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
            <CanvasRenderer 
              frames={storyboard.frames || []}
              currentFrameIndex={activeScene?.frameIndex || 0}
-             onFrameComplete={() => {}} // In this mode, frame is locked to scroll position
+             onFrameComplete={() => {}} 
            />
         </div>
       )}
@@ -120,7 +117,6 @@ export default function ImmersiveReader({
       {/* 4. LAYER: INTERACTIVE HUD & PROCESSING */}
       <div className="absolute inset-0 z-30 pointer-events-none">
         
-        {/* Processing State: Shown when the "Narrative Injection" is happening */}
         {isProcessing && (
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center pointer-events-auto">
             <div className="relative">
@@ -133,7 +129,6 @@ export default function ImmersiveReader({
           </div>
         )}
 
-        {/* HUD: Only shows when we have content */}
         {webpageHtml && (
           <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 transition-all duration-700 pointer-events-auto ${
             showControls ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'
@@ -177,7 +172,6 @@ export default function ImmersiveReader({
         )}
       </div>
 
-      {/* Decorative Vignette: Enhances the parallel feel */}
       <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_150px_rgba(0,0,0,0.8)] z-[25]" />
     </div>
   );
