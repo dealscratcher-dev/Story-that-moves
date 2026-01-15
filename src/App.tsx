@@ -25,18 +25,22 @@ function App() {
 
   /**
    * handleComplete
-   * Supports "progressive loading": 
-   * 1. First call provides the Article HTML (Instant view).
-   * 2. Second call provides the AI Storyboard (Animation injection).
+   * Initial entry point. Used to open the reader immediately with HTML.
    */
   const handleComplete = useCallback((html: string, storyboard: Storyboard | null) => {
+    setActiveContent({ html, storyboard });
+  }, []);
+
+  /**
+   * handleStoryboardUpdate
+   * The "Upgrade" function. This is called by DocumentInput once the 
+   * background AI processing on Railway is finished.
+   */
+  const handleStoryboardUpdate = useCallback((storyboard: Storyboard) => {
     setActiveContent(prev => {
-      // Logic for updating storyboard without re-rendering the whole iframe
-      if (prev && prev.html === html) {
-        return { ...prev, storyboard };
-      }
-      // Logic for new article load
-      return { html, storyboard };
+      if (!prev) return null;
+      // We keep the existing HTML but inject the new storyboard
+      return { ...prev, storyboard };
     });
   }, []);
 
@@ -57,26 +61,27 @@ function App() {
       {/* 1. LAYER: MAIN PRODUCTION STAGE */}
       <main className="h-full w-full relative">
         {activeContent ? (
-          /* IMMERSIVE READER (Parallel Environment)
-            Renders the sandboxed article and the floating motion canvas.
+          /* IMMERSIVE READER 
+             If storyboard is null, it shows the loader.
+             Once handleStoryboardUpdate is called, the loader vanishes.
           */
           <ImmersiveReader 
             webpageHtml={activeContent.html} 
             storyboard={activeContent.storyboard} 
             onExit={handleExit}
-            // Passing isProcessing status if your DocumentInput manages it
             isProcessing={!activeContent.storyboard}
             processingStatus="Synthesizing Narrative Motion..."
           />
         ) : (
-          /* LANDING MODE: Input for URLs or Text
-          */
+          /* LANDING MODE */
           <div className="h-full flex flex-col items-center justify-center p-6 relative z-10">
             <div className="w-full max-w-2xl animate-in fade-in slide-in-from-bottom-8 duration-700">
-              <DocumentInput onComplete={handleComplete} />
+              <DocumentInput 
+                onComplete={handleComplete} 
+                onStoryboardReady={handleStoryboardUpdate} 
+              />
             </div>
             
-            {/* Branding Footer: Animates out when content is loaded */}
             <div className="mt-12 text-center opacity-30 pointer-events-none group">
               <h1 className="text-5xl font-black tracking-tighter mb-2 text-white italic">
                 STITCH<span className="text-emerald-500 group-hover:text-emerald-400 transition-colors">QYLT</span>
@@ -89,16 +94,12 @@ function App() {
         )}
       </main>
 
-      {/* 2. LAYER: GLOBAL NAVIGATION (TASKBAR)
-          Stays at z-100 to ensure it's always above the parallel layers.
-      */}
+      {/* 2. LAYER: GLOBAL NAVIGATION */}
       <div className="relative z-[100]">
         <TaskbarCompanion />
       </div>
       
-      {/* 3. LAYER: AMBIENT ATMOSPHERE
-          Only visible during the input phase to guide focus.
-      */}
+      {/* 3. LAYER: AMBIENT ATMOSPHERE */}
       {!activeContent && (
         <>
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[160px] pointer-events-none animate-pulse" />
