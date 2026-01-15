@@ -12,19 +12,19 @@ export interface Entity {
   };
 }
 
+// Updated to reflect the actual MongoDB structure provided
 export interface NarrativeFrame {
-  id: string;
-  duration?: number;
-  emotion: { primary: string; intensity: number };
-  entities: Entity[];
-  motionPaths: { entityId: string; keyframes: { x: number; y: number }[] }[];
-  styleDNA: {
-    motionEase: string; // This matches the new backend key
-    colors: {
-      background: string;
-      primary: string;
-      accent: string;
-    };
+  sequence: number;
+  description: string;
+  action_beats: any[];
+  layout_hints: { x: number; y: number; label: string }[];
+  emotion_curve: { primary: string; intensity: number; valence: number };
+  motion_ease: string;
+  duration: number;
+  style_dna: {
+    colors: { primary: string; secondary: string; accent: string; background?: string };
+    motionEase: string;
+    particle_count: number;
   };
 }
 
@@ -40,27 +40,19 @@ const Easing = {
   }
 };
 
-const getQuadraticBezier = (t: number, p0: {x: number, y: number}, p2: {x: number, y: number}, control: {x: number, y: number}) => {
-  const invT = 1 - t;
-  return {
-    x: invT * invT * p0.x + 2 * invT * t * control.x + t * t * p2.x,
-    y: invT * invT * p0.y + 2 * invT * t * control.y + t * t * p2.y
-  };
-};
-
 const applyEmotionalJitter = (pos: {x: number, y: number}, intensity: number, time: number) => {
   if (!intensity || intensity < 0.2) return pos;
-  const jitter = Math.sin(time * 0.1) * (intensity * 5);
+  const jitter = Math.sin(time * 0.1) * (intensity * 15); // Increased for visibility
   return { x: pos.x + jitter, y: pos.y + jitter };
 };
 
 // --- MEMORY BANK ---
 const historyCache: Record<string, {x: number, y: number}[]> = {};
 const localMemoryBank = {
-  updateTrajectory: (entity: Entity) => {
-    if (!historyCache[entity.id]) historyCache[entity.id] = [];
-    historyCache[entity.id].push({ ...entity.position });
-    if (historyCache[entity.id].length > 20) historyCache[entity.id].shift();
+  updateTrajectory: (id: string, pos: {x: number, y: number}) => {
+    if (!historyCache[id]) historyCache[id] = [];
+    historyCache[id].push({ ...pos });
+    if (historyCache[id].length > 25) historyCache[id].shift();
   },
   getHistory: (id: string) => historyCache[id] || []
 };
@@ -81,65 +73,52 @@ export function CanvasRenderer({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    
-    if (!canvas || !frames || frames.length === 0 || !frames[currentFrameIndex]) return;
+    if (!canvas || !frames || !frames[currentFrameIndex]) return;
 
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
     const currentFrame = frames[currentFrameIndex];
     const startTime = performance.now();
-    const duration = currentFrame.duration || 4000;
+    const duration = currentFrame.duration || 4500;
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      /** * BUGFIX: "e is not a function"
-       * We verify the existence of the easing function before execution.
-       * If the AI provides an invalid string or CSS cubic-bezier, we fall back to linear.
-       */
-      const rawEase = currentFrame?.styleDNA?.motionEase;
-      const easeFn = (rawEase && Easing[rawEase as keyof typeof Easing]) 
-        ? Easing[rawEase as keyof typeof Easing] 
-        : Easing.linear;
-        
+      // Safety lookup for Easing function
+      const easeKey = (currentFrame.motion_ease || currentFrame.style_dna?.motionEase) as keyof typeof Easing;
+      const easeFn = Easing[easeKey] || Easing.linear;
       const easedProgress = easeFn(progress);
 
       // Stage Setup
-      ctx.globalAlpha = 0.15;
-      ctx.fillStyle = currentFrame?.styleDNA?.colors?.background || '#020617';
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = currentFrame.style_dna?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
 
-      if (currentFrame.entities && Array.isArray(currentFrame.entities)) {
-        currentFrame.entities.forEach((entity) => {
-          if (!entity || !entity.position) return;
-
-          const path = currentFrame.motionPaths?.find(p => p.entityId === entity.id);
-          let { x, y } = entity.position;
-
-          if (path && path.keyframes && path.keyframes.length >= 2) {
-            const p0 = path.keyframes[0];
-            const p2 = path.keyframes[path.keyframes.length - 1];
-            const curveOffset = 150 * (currentFrame.emotion?.intensity || 0);
-            const control = { 
-              x: (p0.x + p2.x) / 2 + curveOffset, 
-              y: (p0.y + p2.y) / 2 - curveOffset 
-            };
-            const pos = getQuadraticBezier(easedProgress, p0, p2, control);
-            x = pos.x;
-            y = pos.y;
-          }
-
-          const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion?.intensity || 0, currentTime);
-          localMemoryBank.updateTrajectory({ ...entity, position: jitteredPos });
+      // Translate action_beats and layout_hints into visual motion
+      if (currentFrame.action_beats && Array.isArray(currentFrame.action_beats)) {
+        currentFrame.action_beats.forEach((beat, index) => {
+          const hint = currentFrame.layout_hints[index] || { x: 0.5, y: 0.5 };
           
-          const history = localMemoryBank.getHistory(entity.id);
-          const primaryColor = currentFrame.styleDNA?.colors?.primary || '#3b82f6';
+          // Map 0.0-1.0 coordinate system to 2000x1200 canvas
+          const targetX = hint.x * 2000;
+          const targetY = hint.y * 1200;
+          
+          // Simple interpolation from a center start point
+          const x = 1000 + (targetX - 1000) * easedProgress;
+          const y = 600 + (targetY - 600) * easedProgress;
+
+          const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion_curve?.intensity || 0, currentTime);
+          const entityId = `beat-${index}-${currentFrame.sequence}`;
+          
+          localMemoryBank.updateTrajectory(entityId, jitteredPos);
+          const history = localMemoryBank.getHistory(entityId);
+          const primaryColor = currentFrame.style_dna?.colors?.primary || '#3b82f6';
 
           drawTrail(ctx, history, primaryColor);
-          drawVisualEntity(ctx, entity, jitteredPos.x, jitteredPos.y, currentFrame);
+          drawVisualEntity(ctx, beat.entity, beat.action, jitteredPos.x, jitteredPos.y, currentFrame);
         });
       }
 
@@ -162,9 +141,9 @@ export function CanvasRenderer({
     ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
-    ctx.setLineDash([4, 8]); 
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.3;
+    ctx.setLineDash([5, 15]); 
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.4;
     points.forEach((p, i) => {
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
@@ -173,31 +152,32 @@ export function CanvasRenderer({
     ctx.restore();
   };
 
-  const drawVisualEntity = (ctx: CanvasRenderingContext2D, entity: Entity, x: number, y: number, frame: NarrativeFrame) => {
-    const size = entity.size || 25;
-    const moodIntensity = frame.emotion?.intensity || 0.5;
-    const action = entity.state?.action || 'default';
+  const drawVisualEntity = (ctx: CanvasRenderingContext2D, label: string, action: string, x: number, y: number, frame: NarrativeFrame) => {
+    const size = 30;
+    const moodIntensity = frame.emotion_curve?.intensity || 0.5;
 
     ctx.save();
-    ctx.shadowBlur = 20 * moodIntensity;
-    ctx.shadowColor = frame.styleDNA?.colors?.accent || '#ffffff';
-    ctx.fillStyle = frame.styleDNA?.colors?.primary || '#3b82f6';
+    ctx.shadowBlur = 30 * moodIntensity;
+    ctx.shadowColor = frame.style_dna?.colors?.accent || '#ffffff';
+    ctx.fillStyle = frame.style_dna?.colors?.primary || '#3b82f6';
 
     ctx.beginPath();
-    if (action === 'expand' || action === 'pulse') {
-      const pulseScale = 1 + Math.sin(Date.now() / 200) * 0.15;
-      ctx.arc(x, y, size * pulseScale, 0, Math.PI * 2);
-    } else if (action === 'upend' || action === 'anger' || action === 'conflict') {
+    // Visual polymorphism based on the "action"
+    if (action === 'write' || action === 'revise') {
+      const pulse = 1 + Math.sin(Date.now() / 150) * 0.2;
+      ctx.arc(x, y, size * pulse, 0, Math.PI * 2);
+    } else if (action === 'anger' || action === 'severe') {
       ctx.rect(x - size, y - size, size * 2, size * 2);
     } else {
       ctx.arc(x, y, size, 0, Math.PI * 2);
     }
     ctx.fill();
 
+    // Label
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 12px Inter, sans-serif';
+    ctx.font = 'bold 14px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText((entity.label || 'Entity').toUpperCase(), x, y + size + 20);
+    ctx.fillText(label.toUpperCase(), x, y + size + 25);
     ctx.restore();
   };
 
