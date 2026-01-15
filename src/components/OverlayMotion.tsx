@@ -27,7 +27,7 @@ interface OverlayMotionProps {
 }
 
 export default function OverlayMotion({ 
-  motionType = 'drift', // Default to prevent undefined errors
+  motionType = 'drift',
   intensity = 0.5, 
   emotion = 'neutral', 
   isActive, 
@@ -39,12 +39,12 @@ export default function OverlayMotion({
   
   const toneMap: Record<string, string> = {
     calm: '148, 163, 184',
-    tense: '255, 255, 255',
+    tense: '200, 200, 255',
     exciting: '255, 230, 100',
-    sad: '71, 85, 105',
-    joyful: '248, 250, 252',
-    mysterious: '139, 92, 246',
-    neutral: '200, 200, 200'
+    sad: '100, 116, 139',
+    joyful: '255, 255, 255',
+    mysterious: '167, 139, 250',
+    neutral: '226, 232, 240'
   };
 
   useEffect(() => {
@@ -60,12 +60,12 @@ export default function OverlayMotion({
       
       const w = canvas.width;
       const h = canvas.height;
-      const count = Math.floor(50 * intensity);
+      // Ensure at least some particles exist even at low intensity
+      const count = Math.floor(40 * (intensity || 0.3));
       
-      // Define margins locally to avoid dependency loops
       const zones: SafeZone[] = [
-        { x: 0, y: 0, width: w * 0.12, height: h },
-        { x: w * 0.88, y: 0, width: w * 0.12, height: h },
+        { x: 0, y: 0, width: w * 0.15, height: h },
+        { x: w * 0.85, y: 0, width: w * 0.15, height: h },
       ];
 
       particlesRef.current = Array.from({ length: count }, () => {
@@ -73,10 +73,10 @@ export default function OverlayMotion({
         return {
           x: zone.x + Math.random() * zone.width,
           y: Math.random() * h,
-          vx: (Math.random() - 0.5) * intensity * 2,
-          vy: (Math.random() - 0.5) * intensity * 2,
-          size: Math.random() * 2 + 0.5,
-          opacity: Math.random() * 0.4 + 0.1,
+          vx: (Math.random() - 0.5) * intensity * 1.5,
+          vy: (Math.random() - 0.5) * intensity * 1.5,
+          size: Math.random() * 1.5 + 0.5,
+          opacity: Math.random() * 0.3 + 0.05, // Lowered for subtler feel
           phase: Math.random() * Math.PI * 2
         };
       });
@@ -85,7 +85,6 @@ export default function OverlayMotion({
     const handleResize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      // We don't re-init particles on every resize to save performance
     };
 
     window.addEventListener('resize', handleResize);
@@ -99,18 +98,20 @@ export default function OverlayMotion({
       
       const rgb = toneMap[emotion] || '255, 255, 255';
 
-      // 1. HUD RENDER (Safely check scene)
+      // 1. HUD RENDER
       if (scene && scene.type) {
         ctx.save();
-        const hudX = canvas.width * 0.89;
-        const hudY = 120;
-        ctx.globalAlpha = Math.sin(time * 1.5) * 0.1 + 0.9;
-        ctx.fillStyle = `rgba(${rgb}, 0.6)`;
-        ctx.font = '900 10px Inter, sans-serif';
-        ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 25);
+        const hudX = canvas.width * 0.92;
+        const hudY = 100;
+        ctx.globalAlpha = Math.sin(time * 1.5) * 0.05 + 0.8;
+        ctx.fillStyle = `rgba(${rgb}, 0.5)`;
+        ctx.font = 'bold 9px "Inter", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 20);
+        
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '500 18px Inter, sans-serif';
-        ctx.fillText(scene.name || 'Narrative Pulse', hudX, hudY);
+        ctx.font = '500 14px "Inter", sans-serif';
+        ctx.fillText(scene.name || 'Processing...', hudX, hudY);
         ctx.restore();
       }
 
@@ -118,22 +119,19 @@ export default function OverlayMotion({
       particlesRef.current.forEach((p, i) => {
         ctx.save();
         
-        // FIX: The "e is not a function" guard
-        // We ensure motionType matches one of our defined logic blocks
         if (motionType === 'breathe') {
           const b = Math.sin(time * 0.8 + p.phase) * intensity;
           ctx.globalAlpha = p.opacity * (1 + b * 0.4);
-          p.y += Math.sin(time * 0.5) * 0.2;
+          p.y += Math.sin(time * 0.5) * 0.1;
         } else if (motionType === 'pulse') {
           const pul = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
-          ctx.shadowBlur = pul * 10;
-          ctx.shadowColor = `rgba(${rgb}, 0.8)`;
+          ctx.shadowBlur = pul * 8;
+          ctx.shadowColor = `rgba(${rgb}, 0.5)`;
         } else if (motionType === 'wave') {
-          p.x += Math.cos(time + i) * 0.5;
-          p.y += Math.sin(time + i) * 0.5;
+          p.x += Math.cos(time + i) * 0.3;
+          p.y += Math.sin(time + i) * 0.3;
         } else {
-          // Default: Drift
-          p.y += p.vy * 0.3;
+          p.y += p.vy * 0.2;
           if (p.y > canvas.height) p.y = 0;
           if (p.y < 0) p.y = canvas.height;
         }
@@ -154,7 +152,6 @@ export default function OverlayMotion({
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       window.removeEventListener('resize', handleResize);
     };
-    // Removed safeZones from dependencies to break the infinite loop
   }, [motionType, intensity, emotion, isActive, scene]);
 
   if (!isActive) return null;
@@ -165,8 +162,8 @@ export default function OverlayMotion({
       className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
       style={{ 
         mixBlendMode: 'screen', 
-        opacity: 0.8,
-        background: 'radial-gradient(circle at 50% 50%, rgba(10,10,12,0) 0%, rgba(10,10,12,0.1) 100%)' 
+        opacity: 0.6, // Lightened overall opacity
+        background: 'transparent' // 🛡️ REMOVED THE DARK GRADIENT
       }}
     />
   );
