@@ -3,11 +3,13 @@ import { Link, FileText, ChevronRight, Loader2 } from 'lucide-react';
 import { fastapiClient } from '../services/fastapiClient';
 
 interface DocumentInputProps {
-  // Pass storyboard as optional so the reader can open even if it's null
+  // onComplete opens the reader immediately with HTML
   onComplete: (html: string, storyboard: any | null) => void;
+  // onStoryboardReady "upgrades" the reader once AI processing finishes
+  onStoryboardReady: (storyboard: any) => void; 
 }
 
-export default function DocumentInput({ onComplete }: DocumentInputProps) {
+export default function DocumentInput({ onComplete, onStoryboardReady }: DocumentInputProps) {
   const [mode, setMode] = useState<'url' | 'text'>('url');
   const [inputValue, setInputValue] = useState('');
   const [isValidating, setIsValidating] = useState(false);
@@ -54,24 +56,29 @@ export default function DocumentInput({ onComplete }: DocumentInputProps) {
       }
 
       // --- PHASE 2: INSTANT OPEN ---
-      // We pass the HTML to the reader IMMEDIATELY. 
-      // This stops the "infinite spin" if the backend is the problem.
+      // Open the reader immediately with HTML and a null storyboard (shows spinner)
       onComplete(finalHtml, null);
+      
+      // Reset UI state locally so user doesn't see "loading" on the landing page anymore
+      setIsValidating(false);
 
       // --- PHASE 3: BACKGROUND AI PROCESSING ---
-      // We do this "fire and forget" so it doesn't block the UI
+      // We do NOT 'await' this entire block at the top level so the reader can stay open
       try {
         const job = await fastapiClient.processArticle(inputValue, textContent);
         const completedJob = await fastapiClient.pollJobCompletion(job.job_id);
         
         if (completedJob.article_id) {
           const storyboard = await fastapiClient.getStoryboard(completedJob.article_id);
-          // Optional: You could use a second callback here to "upgrade" the reader 
-          // with motion once the storyboard arrives.
+          
+          // SUCCESS: Push the storyboard to App.tsx to remove the spinner and start motion
+          onStoryboardReady(storyboard);
           console.log("Narrative analysis attached successfully.");
         }
       } catch (backendError) {
-        console.warn("FastAPI offline. Reader running in basic mode.");
+        console.warn("FastAPI offline or Job failed. Reader running in basic mode.");
+        // SAFETY: Send an empty storyboard object to tell App.tsx to stop spinning
+        onStoryboardReady({ scenes: [], entities: [], frames: [], emotion: { primary: 'neutral', intensity: 0 } });
       }
 
     } catch (e) {
