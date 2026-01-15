@@ -12,19 +12,29 @@ export interface Entity {
   };
 }
 
-// Updated to match your actual MongoDB "Good Taste" / Paul Graham data structure
 export interface NarrativeFrame {
-  sequence: number;
-  description: string;
-  action_beats: any[];
-  layout_hints: { x: number; y: number; label: string }[];
-  emotion_curve: { primary: string; intensity: number; valence: number };
-  motion_ease?: string; // MongoDB top-level key
-  duration: number;
-  style_dna: {
-    colors: { primary: string; secondary: string; accent: string; background?: string };
-    motionEase?: string; // Pydantic/Frontend key
-    particle_count: number;
+  // Supports both Mongo "action_beats" and Original "entities"
+  sequence?: number;
+  action_beats?: any[];
+  layout_hints?: { x: number; y: number; label: string }[];
+  emotion_curve?: { primary: string; intensity: number; valence: number };
+  
+  // Original Structure Fallbacks
+  id?: string;
+  duration?: number;
+  emotion?: { primary: string; intensity: number };
+  entities?: Entity[];
+  motionPaths?: { entityId: string; keyframes: { x: number; y: number }[] }[];
+  
+  motion_ease?: string;
+  style_dna?: {
+    colors: { background?: string; primary: string; secondary?: string; accent: string };
+    motionEase?: string;
+  };
+  // Legacy support for camelCase
+  styleDNA?: {
+    motionEase: string;
+    colors: { background: string; primary: string; accent: string };
   };
 }
 
@@ -41,19 +51,13 @@ const Easing = {
 };
 
 const applyEmotionalJitter = (pos: {x: number, y: number}, intensity: number, time: number) => {
-  if (!intensity || intensity < 0.2) return pos;
-  // Intensity-based shake
-  const shake = Math.sin(time * 0.01) * (intensity * 12);
-  return { x: pos.x + shake, y: pos.y + shake };
+  if (!intensity || intensity < 0.1) return pos;
+  const jitter = Math.sin(time * 0.01) * (intensity * 15);
+  return { x: pos.x + jitter, y: pos.y + jitter };
 };
 
-// --- MEMORY BANK ---
+// --- GLOBAL MEMORY FOR TRAILS ---
 const historyCache: Record<string, {x: number, y: number}[]> = {};
-const updateTrajectory = (id: string, pos: {x: number, y: number}) => {
-  if (!historyCache[id]) historyCache[id] = [];
-  historyCache[id].push({ ...pos });
-  if (historyCache[id].length > 20) historyCache[id].shift();
-};
 
 interface CanvasRendererProps {
   frames: NarrativeFrame[];
@@ -84,54 +88,95 @@ export function CanvasRenderer({
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      /** * 🛡️ DEFENSIVE EASING LOOKUP
-       * This prevents "e is not a function" by verifying the string exists in Easing map.
-       */
-      const rawEaseKey = (currentFrame.motion_ease || currentFrame.style_dna?.motionEase || 'linear') as string;
+      // 1. SAFE EASING LOOKUP
+      const rawEaseKey = (
+        currentFrame.motion_ease || 
+        currentFrame.style_dna?.motionEase || 
+        currentFrame.styleDNA?.motionEase || 
+        'linear'
+      ) as keyof typeof Easing;
       
-      const easeFn = (rawEaseKey in Easing && typeof Easing[rawEaseKey as keyof typeof Easing] === 'function')
-        ? Easing[rawEaseKey as keyof typeof Easing]
-        : (() => {
-            console.warn(`Invalid easing key: "${rawEaseKey}". Falling back to linear.`);
-            return Easing.linear;
-          })();
-
+      const easeFn = Easing[rawEaseKey] || Easing.linear;
       const easedProgress = easeFn(progress);
 
-      // --- STAGE SETUP ---
-      // Paint background with trail persistence
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = currentFrame.style_dna?.colors?.background || '#020617';
+      // 2. STAGE SETUP
+      const colors = currentFrame.style_dna?.colors || currentFrame.styleDNA?.colors;
+      ctx.globalAlpha = 0.2; // Keep for trail persistence
+      ctx.fillStyle = colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
 
-      // --- DATA TRANSLATION LOOP ---
-      // We map MongoDB "action_beats" and "layout_hints" to the Canvas
-      if (currentFrame.action_beats && Array.isArray(currentFrame.action_beats)) {
-        currentFrame.action_beats.forEach((beat, index) => {
-          // Get target position from hints, or default to center
-          const hint = currentFrame.layout_hints[index] || { x: 0.5, y: 0.5 };
-          
-          // Map 0.0-1.0 coords to our 2000x1200 high-res stage
-          const targetX = hint.x * 2000;
-          const targetY = hint.y * 1200;
-          
-          // Animate movement from center (1000, 600) to the target hint
-          const x = 1000 + (targetX - 1000) * easedProgress;
-          const y = 600 + (targetY - 600) * easedProgress;
+      // 3. AGGRESSIVE DATA EXTRACTION
+      const beats = currentFrame.action_beats || currentFrame.entities || [];
+      const hints = currentFrame.layout_hints || [];
+      const intensity = currentFrame.emotion_curve?.intensity || currentFrame.emotion?.intensity || 0.5;
 
-          const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion_curve?.intensity || 0, currentTime);
-          const entityId = `beat-${index}-${currentFrame.sequence}`;
-          
-          updateTrajectory(entityId, jitteredPos);
-          const history = historyCache[entityId] || [];
-          const primaryColor = currentFrame.style_dna?.colors?.primary || '#3b82f6';
-
-          // Draw visual layers
-          drawTrail(ctx, history, primaryColor);
-          drawVisualEntity(ctx, beat.entity, beat.action, jitteredPos.x, jitteredPos.y, currentFrame);
-        });
+      if (beats.length === 0) {
+        // VISUAL DEBUGGER FOR EMPTY DATA
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "30px Inter";
+        ctx.textAlign = "center";
+        ctx.fillText("FRAME LOADED: SEARCHING FOR BEATS...", 1000, 600);
       }
+
+      beats.forEach((item: any, index: number) => {
+        // Determine Position
+        let x, y;
+        
+        // If it's the Mongo Structure (action_beats + layout_hints)
+        if (currentFrame.layout_hints) {
+          const hint = hints[index] || { x: 0.5, y: 0.5 };
+          const targetX = (hint.x || 0.5) * 2000;
+          const targetY = (hint.y || 0.5) * 1200;
+          // Animate from center
+          x = 1000 + (targetX - 1000) * easedProgress;
+          y = 600 + (targetY - 600) * easedProgress;
+        } 
+        // If it's the original Entity structure
+        else {
+          x = item.position?.x || 1000;
+          y = item.position?.y || 600;
+        }
+
+        const jitteredPos = applyEmotionalJitter({ x, y }, intensity, currentTime);
+        const entityId = `entity-${index}-${currentFrameIndex}`;
+
+        // Update Trails
+        if (!historyCache[entityId]) historyCache[entityId] = [];
+        historyCache[entityId].push(jitteredPos);
+        if (historyCache[entityId].length > 25) historyCache[entityId].shift();
+
+        // DRAW
+        const primary = colors?.primary || '#3b82f6';
+        const accent = colors?.accent || '#ffffff';
+        
+        // Trail
+        drawTrail(ctx, historyCache[entityId], primary);
+
+        // Entity Shape
+        const action = item.action || item.state?.action || 'default';
+        const label = item.entity || item.label || 'Entity';
+        
+        ctx.save();
+        ctx.shadowBlur = 40 * intensity;
+        ctx.shadowColor = accent;
+        ctx.fillStyle = primary;
+        ctx.beginPath();
+        
+        if (['write', 'think', 'reflect'].includes(action)) {
+          ctx.arc(jitteredPos.x, jitteredPos.y, 45, 0, Math.PI * 2);
+        } else {
+          ctx.rect(jitteredPos.x - 40, jitteredPos.y - 40, 80, 80);
+        }
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 28px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label.toUpperCase(), jitteredPos.x, jitteredPos.y + 100);
+        ctx.restore();
+      });
 
       if (progress < 1) {
         animationFrameRef.current = requestAnimationFrame(animate);
@@ -146,16 +191,14 @@ export function CanvasRenderer({
     };
   }, [currentFrameIndex, frames, onFrameComplete]);
 
-  // --- HELPERS ---
-
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
     if (points.length < 2) return;
     ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
-    ctx.setLineDash([4, 12]); 
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.3;
+    ctx.setLineDash([8, 16]);
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.4;
     points.forEach((p, i) => {
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
@@ -164,37 +207,8 @@ export function CanvasRenderer({
     ctx.restore();
   };
 
-  const drawVisualEntity = (ctx: CanvasRenderingContext2D, label: string, action: string, x: number, y: number, frame: NarrativeFrame) => {
-    const size = 35;
-    const moodIntensity = frame.emotion_curve?.intensity || 0.5;
-
-    ctx.save();
-    ctx.shadowBlur = 25 * moodIntensity;
-    ctx.shadowColor = frame.style_dna?.colors?.accent || '#ffffff';
-    ctx.fillStyle = frame.style_dna?.colors?.primary || '#3b82f6';
-
-    ctx.beginPath();
-    // Logic-driven shapes based on AI "action"
-    if (action === 'write' || action === 'think' || action === 'reflect') {
-      const pulse = 1 + Math.sin(Date.now() / 200) * 0.1;
-      ctx.arc(x, y, size * pulse, 0, Math.PI * 2);
-    } else if (action === 'severe' || action === 'anger' || action === 'test') {
-      ctx.rect(x - size, y - size, size * 2, size * 2);
-    } else {
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-    }
-    ctx.fill();
-
-    // Entity Label Text
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(label.toUpperCase(), x, y + size + 30);
-    ctx.restore();
-  };
-
   return (
-    <div className="relative w-full h-full bg-black overflow-hidden">
+    <div className="relative w-full h-full bg-black overflow-hidden flex items-center justify-center">
       <canvas 
         ref={canvasRef} 
         width={2000} 
