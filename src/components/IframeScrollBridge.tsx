@@ -16,7 +16,7 @@ interface IframeScrollBridgeProps {
 export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive }: IframeScrollBridgeProps) {
   const injectedRef = useRef(false);
   const lastUpdateRef = useRef<number>(0);
-  const throttleMs = 50; // High-performance throttle for smooth pathfinding
+  const throttleMs = 50; 
 
   useEffect(() => {
     if (!isActive || !iframeRef.current) {
@@ -28,7 +28,6 @@ export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive
 
     const injectScrollTracker = () => {
       try {
-        // Safety check: accessing contentDocument will throw if CORS is violated
         const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
         if (!iframeDoc || injectedRef.current) return;
 
@@ -62,7 +61,6 @@ export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive
               }
             }, { passive: true });
             
-            // Initial ping
             sendUpdate();
           })();
         `;
@@ -70,14 +68,12 @@ export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive
         iframeDoc.head.appendChild(script);
         injectedRef.current = true;
       } catch (e) {
-        // Fallback: If CORS blocks us, we rely on the parent wheel events
         console.warn('IframeBridge: Cross-origin access denied. Using fallback tracking.');
       }
     };
 
     const handleLoad = () => injectScrollTracker();
 
-    // Check if already loaded
     if (iframe.contentDocument?.readyState === 'complete') {
       injectScrollTracker();
     } else {
@@ -89,14 +85,26 @@ export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive
     };
   }, [iframeRef, isActive]);
 
-  // Handle messages with throttling
+  // --- SAFE MESSAGE HANDLER ---
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      // 1. Basic Filters
       if (!isActive || event.data?.type !== 'iframe-scroll') return;
 
       const now = Date.now();
       if (now - lastUpdateRef.current >= throttleMs) {
-        onScrollChange(event.data.data);
+        
+        /** * 🛡️ DEFENSIVE GUARD: 
+         * This stops "e is not a function" crash.
+         * We verify onScrollChange is actually a function before executing.
+         */
+        if (typeof onScrollChange === 'function') {
+          onScrollChange(event.data.data);
+        } else {
+          // If we hit this, the parent is passing bad props
+          console.error("IframeScrollBridge Error: 'onScrollChange' prop is not a function. Received:", onScrollChange);
+        }
+
         lastUpdateRef.current = now;
       }
     };
@@ -105,16 +113,13 @@ export default function IframeScrollBridge({ iframeRef, onScrollChange, isActive
     return () => window.removeEventListener('message', handleMessage);
   }, [onScrollChange, isActive]);
 
-  // Fallback: Listener for when users scroll on the Overlay (the "Stage")
-  // This ensures motion still works even if iframe injection is blocked
+  // Global wheel fallback (optional intent detection)
   useEffect(() => {
     if (!isActive) return;
 
     const handleGlobalWheel = (e: WheelEvent) => {
-      // If injection failed, we can still detect the 'intent' to scroll
-      // and pass an estimated delta to the pathfinder
       if (!injectedRef.current) {
-         // This can be expanded to update an 'estimated' scrollY
+         // Potential for estimated delta logic here
       }
     };
 
