@@ -27,8 +27,8 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
 
       // --- PHASE 1: IMMEDIATE CONTENT FETCH ---
       if (mode === 'url') {
-        // 🚀 PATCHED: Updated to use the verified super-function endpoint
-        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/super-function`;
+        // 🚀 PATCHED: Updated to use the new clever-action endpoint
+        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/clever-action`;
         
         const headers = {
           'Content-Type': 'application/json',
@@ -49,8 +49,8 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
         
         const data = await response.json();
         finalHtml = data.html;
-        // If your edge function returns both, use them; 
-        // otherwise, we use the cleaned HTML as the base for text
+        
+        // Use the cleaned text if the API provides it, otherwise strip tags from HTML
         textContent = data.text || data.html.replace(/<[^>]*>?/gm, ''); 
 
       } else {
@@ -59,7 +59,7 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
       }
 
       // --- PHASE 2: INSTANT OPEN ---
-      // Transition the user into the reader immediately
+      // Transition the user into the reader immediately with the HTML
       onComplete(finalHtml, null);
       
       // Reset local input state
@@ -73,12 +73,13 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
         if (completedJob.article_id) {
           const storyboard = await fastapiClient.getStoryboard(completedJob.article_id);
           
-          // Push the storyboard to the already-open reader
+          // Upgrade the reader experience with the AI storyboard
           onStoryboardReady(storyboard);
           console.log("Narrative analysis attached successfully.");
         }
       } catch (backendError) {
         console.warn("AI Backend unreachable. Continuing in basic reader mode.");
+        // Push empty storyboard to stop the loaders in the UI
         onStoryboardReady({ 
           scenes: [], 
           entities: [], 
