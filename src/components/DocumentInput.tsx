@@ -27,7 +27,9 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
 
       // --- PHASE 1: IMMEDIATE CONTENT FETCH ---
       if (mode === 'url') {
-        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-webpage`;
+        // 🚀 UPDATED: Pointing to the new dynamic-api endpoint
+        const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dynamic-api`;
+        
         const headers = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
@@ -39,6 +41,9 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
           headers,
           body: JSON.stringify({ url: inputValue, mode: 'html' }),
         });
+
+        if (!htmlRes.ok) throw new Error('Could not fetch webpage HTML');
+        
         const htmlData = await htmlRes.json();
         finalHtml = htmlData.html;
 
@@ -48,6 +53,9 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
           headers,
           body: JSON.stringify({ url: inputValue }),
         });
+
+        if (!textRes.ok) throw new Error('Could not fetch plain text for AI');
+
         const textData = await textRes.json();
         textContent = textData.text;
       } else {
@@ -56,14 +64,13 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
       }
 
       // --- PHASE 2: INSTANT OPEN ---
-      // Open the reader immediately with HTML and a null storyboard (shows spinner)
+      // Open the reader immediately with HTML and a null storyboard
       onComplete(finalHtml, null);
       
-      // Reset UI state locally so user doesn't see "loading" on the landing page anymore
+      // Reset UI state locally
       setIsValidating(false);
 
       // --- PHASE 3: BACKGROUND AI PROCESSING ---
-      // We do NOT 'await' this entire block at the top level so the reader can stay open
       try {
         const job = await fastapiClient.processArticle(inputValue, textContent);
         const completedJob = await fastapiClient.pollJobCompletion(job.job_id);
@@ -71,14 +78,19 @@ export default function DocumentInput({ onComplete, onStoryboardReady }: Documen
         if (completedJob.article_id) {
           const storyboard = await fastapiClient.getStoryboard(completedJob.article_id);
           
-          // SUCCESS: Push the storyboard to App.tsx to remove the spinner and start motion
+          // SUCCESS: Push the storyboard to App.tsx
           onStoryboardReady(storyboard);
           console.log("Narrative analysis attached successfully.");
         }
       } catch (backendError) {
         console.warn("FastAPI offline or Job failed. Reader running in basic mode.");
-        // SAFETY: Send an empty storyboard object to tell App.tsx to stop spinning
-        onStoryboardReady({ scenes: [], entities: [], frames: [], emotion: { primary: 'neutral', intensity: 0 } });
+        // SAFETY: Stop the loader in the reader even if AI fails
+        onStoryboardReady({ 
+          scenes: [], 
+          entities: [], 
+          frames: [], 
+          emotion: { primary: 'neutral', intensity: 0 } 
+        });
       }
 
     } catch (e) {
