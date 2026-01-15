@@ -19,7 +19,7 @@ export interface NarrativeFrame {
   entities: Entity[];
   motionPaths: { entityId: string; keyframes: { x: number; y: number }[] }[];
   styleDNA: {
-    motionEase: string;
+    motionEase: string; // This matches the new backend key
     colors: {
       background: string;
       primary: string;
@@ -82,7 +82,6 @@ export function CanvasRenderer({
   useEffect(() => {
     const canvas = canvasRef.current;
     
-    // CRITICAL: Stop the render if data is corrupted or missing
     if (!canvas || !frames || frames.length === 0 || !frames[currentFrameIndex]) return;
 
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -98,13 +97,16 @@ export function CanvasRenderer({
       
       /** * BUGFIX: "e is not a function"
        * We verify the existence of the easing function before execution.
-       * If the AI provides an invalid string, we fall back to linear.
+       * If the AI provides an invalid string or CSS cubic-bezier, we fall back to linear.
        */
-      const easeKey = currentFrame?.styleDNA?.motionEase as keyof typeof Easing;
-      const easeFn = Easing[easeKey] || Easing.linear;
-      const easedProgress = typeof easeFn === 'function' ? easeFn(progress) : progress;
+      const rawEase = currentFrame?.styleDNA?.motionEase;
+      const easeFn = (rawEase && Easing[rawEase as keyof typeof Easing]) 
+        ? Easing[rawEase as keyof typeof Easing] 
+        : Easing.linear;
+        
+      const easedProgress = easeFn(progress);
 
-      // Stage Setup (Ambient Trail Effect)
+      // Stage Setup
       ctx.globalAlpha = 0.15;
       ctx.fillStyle = currentFrame?.styleDNA?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -112,13 +114,11 @@ export function CanvasRenderer({
 
       if (currentFrame.entities && Array.isArray(currentFrame.entities)) {
         currentFrame.entities.forEach((entity) => {
-          // Safety guard for entity structure
           if (!entity || !entity.position) return;
 
           const path = currentFrame.motionPaths?.find(p => p.entityId === entity.id);
           let { x, y } = entity.position;
 
-          // Process Motion Paths
           if (path && path.keyframes && path.keyframes.length >= 2) {
             const p0 = path.keyframes[0];
             const p2 = path.keyframes[path.keyframes.length - 1];
@@ -132,7 +132,6 @@ export function CanvasRenderer({
             y = pos.y;
           }
 
-          // Apply Narrative Artifacts (Jitter, Trails)
           const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion?.intensity || 0, currentTime);
           localMemoryBank.updateTrajectory({ ...entity, position: jitteredPos });
           
@@ -185,7 +184,6 @@ export function CanvasRenderer({
     ctx.fillStyle = frame.styleDNA?.colors?.primary || '#3b82f6';
 
     ctx.beginPath();
-    // Visual polymorphism based on AI "state"
     if (action === 'expand' || action === 'pulse') {
       const pulseScale = 1 + Math.sin(Date.now() / 200) * 0.15;
       ctx.arc(x, y, size * pulseScale, 0, Math.PI * 2);
@@ -196,7 +194,6 @@ export function CanvasRenderer({
     }
     ctx.fill();
 
-    // Text Label Injection
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 12px Inter, sans-serif';
     ctx.textAlign = 'center';
@@ -206,7 +203,6 @@ export function CanvasRenderer({
 
   return (
     <div className="relative w-full h-full bg-transparent">
-      {/* 2000x1200 Stage provides high-fidelity motion even when scaled */}
       <canvas 
         ref={canvasRef} 
         width={2000} 
