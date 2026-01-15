@@ -37,15 +37,14 @@ export default function OverlayMotion({
   const animationRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
   
-  // Adjusted toneMap: Using darker grays so particles are visible on white pages
   const toneMap: Record<string, string> = {
-    calm: '148, 163, 184',
-    tense: '100, 100, 100',
-    exciting: '255, 180, 0',
-    sad: '71, 85, 105',
-    joyful: '100, 150, 255',
-    mysterious: '139, 92, 246',
-    neutral: '150, 150, 150'
+    calm: '100, 116, 139',      // Slate 500
+    tense: '20, 20, 20',       // Near black for tension
+    exciting: '234, 179, 8',   // Yellow 500
+    sad: '71, 85, 105',        // Slate 600
+    joyful: '59, 130, 246',    // Blue 500
+    mysterious: '139, 92, 246', // Violet 500
+    neutral: '148, 163, 184'   // Slate 400
   };
 
   useEffect(() => {
@@ -61,11 +60,11 @@ export default function OverlayMotion({
       
       const w = canvas.width;
       const h = canvas.height;
-      const count = Math.floor(40 * intensity);
+      const count = Math.floor(50 * intensity);
       
       const zones: SafeZone[] = [
-        { x: 0, y: 0, width: w * 0.12, height: h },
-        { x: w * 0.88, y: 0, width: w * 0.12, height: h },
+        { x: 0, y: 0, width: w * 0.15, height: h },
+        { x: w * 0.85, y: 0, width: w * 0.15, height: h },
       ];
 
       particlesRef.current = Array.from({ length: count }, () => {
@@ -75,8 +74,8 @@ export default function OverlayMotion({
           y: Math.random() * h,
           vx: (Math.random() - 0.5) * intensity * 1.5,
           vy: (Math.random() - 0.5) * intensity * 1.5,
-          size: Math.random() * 2 + 0.5,
-          opacity: Math.random() * 0.3 + 0.1,
+          size: Math.random() * 3 + 1, // Larger particles for visibility
+          opacity: Math.random() * 0.4 + 0.2,
           phase: Math.random() * Math.PI * 2
         };
       });
@@ -97,9 +96,9 @@ export default function OverlayMotion({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       time += 0.016;
       
-      const rgb = toneMap[emotion] || '150, 150, 150';
+      const rgb = toneMap[emotion] || '148, 163, 184';
 
-      // 1. HUD RENDER (Using dark text for clarity on white background)
+      // 1. HUD RENDER
       if (scene && scene.type) {
         ctx.save();
         const hudX = canvas.width * 0.89;
@@ -108,7 +107,7 @@ export default function OverlayMotion({
         ctx.fillStyle = `rgba(${rgb}, 1)`;
         ctx.font = '900 10px Inter, sans-serif';
         ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 25);
-        ctx.fillStyle = '#111111'; // Sharp dark text
+        ctx.fillStyle = '#111111';
         ctx.font = '600 18px Inter, sans-serif';
         ctx.fillText(scene.name || 'Narrative Pulse', hudX, hudY);
         ctx.restore();
@@ -121,6 +120,9 @@ export default function OverlayMotion({
           const b = Math.sin(time * 0.8 + p.phase) * intensity;
           ctx.globalAlpha = p.opacity * (1 + b * 0.4);
           p.y += Math.sin(time * 0.5) * 0.2;
+        } else if (motionType === 'pulse') {
+          const pul = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
+          ctx.globalAlpha = p.opacity + (pul * 0.3);
         } else {
           p.y += p.vy * 0.3;
           if (p.y > canvas.height) p.y = 0;
@@ -148,16 +150,35 @@ export default function OverlayMotion({
   if (!isActive) return null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
-      style={{ 
-        // 🚀 THE FIX: Changed to 'multiply' and white wash
-        mixBlendMode: 'multiply', 
-        opacity: 0.9,
-        background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.1) 100%)',
-        backdropFilter: 'contrast(1.02) brightness(1.02)'
-      }}
-    />
+    <>
+      {/* 🚀 ENGINE SIGNAL TAG: Top-right status indicator */}
+      <div className="fixed top-6 right-6 z-[60] flex items-center gap-3 pointer-events-none select-none">
+        <div className="flex flex-col items-end">
+          <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
+              Engine Live
+            </span>
+          </div>
+          <span className="text-[9px] font-mono text-slate-400 mt-1 mr-2 bg-white/40 px-1">
+            {motionType.toUpperCase()} // {emotion.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
+        style={{ 
+          mixBlendMode: 'multiply', 
+          opacity: 0.8,
+          background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.05) 100%)',
+          backdropFilter: 'contrast(1.01) brightness(1.01)'
+        }}
+      />
+    </>
   );
 }
