@@ -81,8 +81,9 @@ export function CanvasRenderer({
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    
     // CRITICAL: Stop the render if data is corrupted or missing
-    if (!canvas || !frames || !frames[currentFrameIndex]) return;
+    if (!canvas || !frames || frames.length === 0 || !frames[currentFrameIndex]) return;
 
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
@@ -95,22 +96,29 @@ export function CanvasRenderer({
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      // FIX: The "e is not a function" patch
+      /** * BUGFIX: "e is not a function"
+       * We verify the existence of the easing function before execution.
+       * If the AI provides an invalid string, we fall back to linear.
+       */
       const easeKey = currentFrame?.styleDNA?.motionEase as keyof typeof Easing;
       const easeFn = Easing[easeKey] || Easing.linear;
-      const easedProgress = easeFn(progress);
+      const easedProgress = typeof easeFn === 'function' ? easeFn(progress) : progress;
 
-      // Stage Setup
+      // Stage Setup (Ambient Trail Effect)
       ctx.globalAlpha = 0.15;
       ctx.fillStyle = currentFrame?.styleDNA?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
 
-      if (currentFrame.entities) {
+      if (currentFrame.entities && Array.isArray(currentFrame.entities)) {
         currentFrame.entities.forEach((entity) => {
-          const path = currentFrame.motionPaths?.find(p => p.entityId === entity.id);
-          let { x, y } = entity.position || { x: 0, y: 0 };
+          // Safety guard for entity structure
+          if (!entity || !entity.position) return;
 
+          const path = currentFrame.motionPaths?.find(p => p.entityId === entity.id);
+          let { x, y } = entity.position;
+
+          // Process Motion Paths
           if (path && path.keyframes && path.keyframes.length >= 2) {
             const p0 = path.keyframes[0];
             const p2 = path.keyframes[path.keyframes.length - 1];
@@ -124,6 +132,7 @@ export function CanvasRenderer({
             y = pos.y;
           }
 
+          // Apply Narrative Artifacts (Jitter, Trails)
           const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion?.intensity || 0, currentTime);
           localMemoryBank.updateTrajectory({ ...entity, position: jitteredPos });
           
@@ -146,7 +155,7 @@ export function CanvasRenderer({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [currentFrameIndex, frames]);
+  }, [currentFrameIndex, frames, onFrameComplete]);
 
   // --- HELPERS ---
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
@@ -176,16 +185,18 @@ export function CanvasRenderer({
     ctx.fillStyle = frame.styleDNA?.colors?.primary || '#3b82f6';
 
     ctx.beginPath();
+    // Visual polymorphism based on AI "state"
     if (action === 'expand' || action === 'pulse') {
       const pulseScale = 1 + Math.sin(Date.now() / 200) * 0.15;
       ctx.arc(x, y, size * pulseScale, 0, Math.PI * 2);
-    } else if (action === 'upend' || action === 'anger') {
+    } else if (action === 'upend' || action === 'anger' || action === 'conflict') {
       ctx.rect(x - size, y - size, size * 2, size * 2);
     } else {
       ctx.arc(x, y, size, 0, Math.PI * 2);
     }
     ctx.fill();
 
+    // Text Label Injection
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 12px Inter, sans-serif';
     ctx.textAlign = 'center';
@@ -195,7 +206,13 @@ export function CanvasRenderer({
 
   return (
     <div className="relative w-full h-full bg-transparent">
-      <canvas ref={canvasRef} width={2000} height={1200} className="w-full h-full object-contain pointer-events-none" />
+      {/* 2000x1200 Stage provides high-fidelity motion even when scaled */}
+      <canvas 
+        ref={canvasRef} 
+        width={2000} 
+        height={1200} 
+        className="w-full h-full object-contain pointer-events-none" 
+      />
     </div>
   );
 }
