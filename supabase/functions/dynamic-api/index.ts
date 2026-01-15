@@ -1,9 +1,9 @@
 // 1. Define robust CORS headers
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*", // Allows any origin, including your Netlify app
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-requested-with",
-  "Access-Control-Max-Age": "86400", // Cache preflight for 24 hours
+  "Access-Control-Max-Age": "86400",
 };
 
 // 2. Helper for consistent JSON responses
@@ -19,36 +19,35 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 }
 
 Deno.serve(async (req: Request) => {
-  // 🛡️ CRITICAL: Handle CORS preflight explicitly
-  // The browser sends OPTIONS before POST; it MUST return 200 OK with corsHeaders
+  // 🛡️ Handle CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response("ok", { 
-      status: 200, 
-      headers: corsHeaders 
-    });
+    return new Response("ok", { status: 200, headers: corsHeaders });
+  }
+
+  // 🛡️ Handle direct browser visits (GET)
+  if (req.method === "GET") {
+    return jsonResponse({ message: "Dynamic API is online. Use POST to fetch content." });
   }
 
   // Only allow POST for the actual fetching logic
   if (req.method !== "POST") {
-    return jsonResponse(
-      { error: "Method not allowed", allowed: ["POST"] },
-      { status: 405 },
-    );
+    return jsonResponse({ error: "Method not allowed", allowed: ["POST"] }, { status: 405 });
   }
 
   let url: string | undefined;
   let mode: "html" | "text" | undefined;
 
-  // ---- Parse body safely ----
+  // ---- 🛡️ SAFE PARSING PATCH ----
   try {
-    const body = await req.json();
+    const bodyText = await req.text();
+    if (!bodyText) {
+      return jsonResponse({ error: "Empty request body" }, { status: 400 });
+    }
+    const body = JSON.parse(bodyText);
     url = body?.url;
     mode = body?.mode;
   } catch (err) {
-    return jsonResponse(
-      { error: "Invalid JSON body", details: String(err) },
-      { status: 400 },
-    );
+    return jsonResponse({ error: "Malformed JSON", details: String(err) }, { status: 400 });
   }
 
   if (!url || typeof url !== "string") {
@@ -64,12 +63,8 @@ Deno.serve(async (req: Request) => {
 
     if (!upstream.ok) {
       return jsonResponse(
-        {
-          error: "Failed to fetch upstream",
-          status: upstream.status,
-          statusText: upstream.statusText,
-        },
-        { status: upstream.status },
+        { error: "Failed to fetch upstream", status: upstream.status },
+        { status: upstream.status }
       );
     }
 
@@ -84,15 +79,13 @@ Deno.serve(async (req: Request) => {
         .replace(/<base[^>]*>/gi, "")
         .replace(/<head>/i, `<head><base href="${baseUrl}">`)
         .replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, "")
-        .replace(//g, "")
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, (match) => {
-          if (match.length > 15000) return ""; // Slightly increased style limit
+          if (match.length > 15000) return ""; 
           return match;
         })
         .replace(/\s+/g, " ")
         .trim();
 
-      // Safety cap for srcDoc stability
       const MAX_SIZE = 950_000;
       if (processedHtml.length > MAX_SIZE) {
         const bodyMatch = processedHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
@@ -107,30 +100,20 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ html: processedHtml, url });
     }
 
-    // ---------- MODE: TEXT (standard extraction) ----------
+    // ---------- MODE: TEXT ----------
     const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
     const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
-
     let content = articleMatch ? articleMatch[1] : mainMatch ? mainMatch[1] : html;
     const paragraphs = content.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) ?? [];
 
     let text = paragraphs
-      .map((p) => {
-        return p
-          .replace(/<[^>]+>/g, "")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .trim();
-      })
+      .map((p) => p.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").trim())
       .filter((p) => p.length > 20)
       .join("\n\n");
 
     return jsonResponse({ text, url });
   } catch (error) {
-    console.error("fetch-webpage error:", error);
-    return jsonResponse(
-      { error: "Internal error", details: String(error) },
-      { status: 500 },
-    );
+    console.error("fetch error:", error);
+    return jsonResponse({ error: "Internal error", details: String(error) }, { status: 500 });
   }
 });
