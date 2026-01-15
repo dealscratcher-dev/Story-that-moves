@@ -37,15 +37,15 @@ export default function OverlayMotion({
   const animationRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
   
-  // PATCHED: Slightly darker neutrals/calms so particles show up on white articles
+  // Adjusted toneMap: Using darker grays so particles are visible on white pages
   const toneMap: Record<string, string> = {
-    calm: '100, 120, 140',
-    tense: '255, 255, 255',
-    exciting: '255, 210, 50',
-    sad: '60, 70, 90',
-    joyful: '200, 220, 255',
-    mysterious: '110, 70, 200',
-    neutral: '120, 120, 120'
+    calm: '148, 163, 184',
+    tense: '100, 100, 100',
+    exciting: '255, 180, 0',
+    sad: '71, 85, 105',
+    joyful: '100, 150, 255',
+    mysterious: '139, 92, 246',
+    neutral: '150, 150, 150'
   };
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function OverlayMotion({
       
       const w = canvas.width;
       const h = canvas.height;
-      const count = Math.floor(60 * intensity); // Slightly more particles for the light mode
+      const count = Math.floor(40 * intensity);
       
       const zones: SafeZone[] = [
         { x: 0, y: 0, width: w * 0.12, height: h },
@@ -73,10 +73,10 @@ export default function OverlayMotion({
         return {
           x: zone.x + Math.random() * zone.width,
           y: Math.random() * h,
-          vx: (Math.random() - 0.5) * intensity * 2,
-          vy: (Math.random() - 0.5) * intensity * 2,
-          size: Math.random() * 2.5 + 0.5,
-          opacity: Math.random() * 0.5 + 0.2,
+          vx: (Math.random() - 0.5) * intensity * 1.5,
+          vy: (Math.random() - 0.5) * intensity * 1.5,
+          size: Math.random() * 2 + 0.5,
+          opacity: Math.random() * 0.3 + 0.1,
           phase: Math.random() * Math.PI * 2
         };
       });
@@ -97,20 +97,18 @@ export default function OverlayMotion({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       time += 0.016;
       
-      const rgb = toneMap[emotion] || '120, 120, 120';
+      const rgb = toneMap[emotion] || '150, 150, 150';
 
-      // 1. HUD RENDER
+      // 1. HUD RENDER (Using dark text for clarity on white background)
       if (scene && scene.type) {
         ctx.save();
         const hudX = canvas.width * 0.89;
         const hudY = 120;
-        ctx.globalAlpha = Math.sin(time * 1.5) * 0.1 + 0.9;
-        ctx.fillStyle = `rgba(${rgb}, 0.8)`;
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = `rgba(${rgb}, 1)`;
         ctx.font = '900 10px Inter, sans-serif';
         ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 25);
-        
-        // Use darker text for HUD if the background is light
-        ctx.fillStyle = '#111111'; 
+        ctx.fillStyle = '#111111'; // Sharp dark text
         ctx.font = '600 18px Inter, sans-serif';
         ctx.fillText(scene.name || 'Narrative Pulse', hudX, hudY);
         ctx.restore();
@@ -119,18 +117,10 @@ export default function OverlayMotion({
       // 2. PARTICLE ENGINE
       particlesRef.current.forEach((p, i) => {
         ctx.save();
-        
         if (motionType === 'breathe') {
           const b = Math.sin(time * 0.8 + p.phase) * intensity;
           ctx.globalAlpha = p.opacity * (1 + b * 0.4);
           p.y += Math.sin(time * 0.5) * 0.2;
-        } else if (motionType === 'pulse') {
-          const pul = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
-          ctx.shadowBlur = pul * 10;
-          ctx.shadowColor = `rgba(${rgb}, 0.8)`;
-        } else if (motionType === 'wave') {
-          p.x += Math.cos(time + i) * 0.5;
-          p.y += Math.sin(time + i) * 0.5;
         } else {
           p.y += p.vy * 0.3;
           if (p.y > canvas.height) p.y = 0;
@@ -162,11 +152,11 @@ export default function OverlayMotion({
       ref={canvasRef}
       className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
       style={{ 
-        // PATCHED: Changed blend mode and background for visibility
+        // 🚀 THE FIX: Changed to 'multiply' and white wash
         mixBlendMode: 'multiply', 
-        opacity: 0.7,
-        background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.4) 100%)',
-        backdropFilter: 'contrast(1.1) brightness(1.05)'
+        opacity: 0.9,
+        background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.1) 100%)',
+        backdropFilter: 'contrast(1.02) brightness(1.02)'
       }}
     />
   );
