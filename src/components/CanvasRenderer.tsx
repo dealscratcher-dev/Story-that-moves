@@ -1,8 +1,71 @@
 import { useEffect, useRef } from 'react';
-import type { NarrativeFrame, Entity } from '../types/narrative';
-import { Easing, getQuadraticBezier, applyEmotionalJitter } from '../lib/motionLogic';
-import { memoryBank } from '../services/memoryBank';
 
+// --- STANDALONE TYPES (Replacing external imports) ---
+export interface Entity {
+  id: string;
+  label: string;
+  position: { x: number; y: number };
+  size?: number;
+  state?: {
+    action?: string;
+    cue?: string;
+  };
+}
+
+export interface NarrativeFrame {
+  id: string;
+  duration?: number;
+  emotion: { primary: string; intensity: number };
+  entities: Entity[];
+  motionPaths: { entityId: string; keyframes: { x: number; y: number }[] }[];
+  styleDNA: {
+    motionEase: string;
+    colors: {
+      background: string;
+      primary: string;
+      accent: string;
+    };
+  };
+}
+
+// --- INLINED MOTION LOGIC (Replacing ../lib/motionLogic) ---
+const Easing = {
+  linear: (t: number) => t,
+  easeInOutQuad: (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+  easeOutCubic: (t: number) => 1 - Math.pow(1 - t, 3),
+  backOut: (t: number) => {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+};
+
+const getQuadraticBezier = (t: number, p0: {x: number, y: number}, p2: {x: number, y: number}, control: {x: number, y: number}) => {
+  const invT = 1 - t;
+  return {
+    x: invT * invT * p0.x + 2 * invT * t * control.x + t * t * p2.x,
+    y: invT * invT * p0.y + 2 * invT * t * control.y + t * t * p2.y
+  };
+};
+
+const applyEmotionalJitter = (pos: {x: number, y: number}, intensity: number, time: number) => {
+  if (intensity < 0.2) return pos;
+  const jitter = Math.sin(time * 0.1) * (intensity * 5);
+  return { x: pos.x + jitter, y: pos.y + jitter };
+};
+
+// --- INLINED MEMORY BANK (Replacing ../services/memoryBank) ---
+const historyCache: Record<string, {x: number, y: number}[]> = {};
+const localMemoryBank = {
+  updateTrajectory: (entity: Entity) => {
+    if (!historyCache[entity.id]) historyCache[entity.id] = [];
+    historyCache[entity.id].push({ ...entity.position });
+    if (historyCache[entity.id].length > 20) historyCache[entity.id].shift();
+  },
+  getHistory: (id: string) => historyCache[id] || []
+};
+
+// --- MAIN COMPONENT ---
 interface CanvasRendererProps {
   frames: NarrativeFrame[];
   currentFrameIndex: number;
@@ -20,7 +83,7 @@ export function CanvasRenderer({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !frames[currentFrameIndex]) return;
-    const ctx = canvas.getContext('2d', { alpha: false }); // Performance optimization
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
     const currentFrame = frames[currentFrameIndex];
@@ -31,54 +94,39 @@ export function CanvasRenderer({
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      // Apply Easing from StyleDNA (mapped to Easing lib)
-      const easeKey = currentFrame.styleDNA.motionEase as keyof typeof Easing;
+      const easeKey = (currentFrame.styleDNA.motionEase as keyof typeof Easing) || 'linear';
       const easedProgress = Easing[easeKey]?.(progress) ?? progress;
 
-      // --- STAGE SETUP ---
-      // Cinematic organic trails: we don't clear, we layer the background with low opacity
+      // Stage Setup (Cinematic Trails)
       ctx.globalAlpha = 0.15;
-      ctx.fillStyle = currentFrame.styleDNA.colors.background;
+      ctx.fillStyle = currentFrame.styleDNA.colors.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
 
-      // --- RENDER ENTITIES ---
       currentFrame.entities.forEach((entity) => {
-        const path = currentFrame.motionPaths.find(p => p.entityId === entity.id);
+        const path = currentFrame.motionPaths?.find(p => p.entityId === entity.id);
         let { x, y } = entity.position;
 
-        // Calculate Position via Bezier Path
         if (path && path.keyframes.length >= 2) {
           const p0 = path.keyframes[0];
           const p2 = path.keyframes[path.keyframes.length - 1];
-          
-          // Emotional Curve logic: "High intensity" creates sharper/wider curves
           const curveOffset = 150 * currentFrame.emotion.intensity;
           const control = { 
             x: (p0.x + p2.x) / 2 + curveOffset, 
             y: (p0.y + p2.y) / 2 - curveOffset 
           };
-          
           const pos = getQuadraticBezier(easedProgress, p0, p2, control);
           x = pos.x;
           y = pos.y;
         }
 
-        // Apply Micro-interactions (Jitter/Vibration)
-        const jitteredPos = applyEmotionalJitter(
-          { x, y }, 
-          currentFrame.emotion.intensity, 
-          currentTime
-        );
-
-        // Update persistence in MemoryBank
-        memoryBank.updateTrajectory({ ...entity, position: jitteredPos }, currentFrame.id);
+        const jitteredPos = applyEmotionalJitter({ x, y }, currentFrame.emotion.intensity, currentTime);
         
-        // Render persistence (Trails)
-        const history = memoryBank.getHistory(entity.id);
-        drawTrail(ctx, history, currentFrame.styleDNA.colors.primary);
+        // Use local memory logic
+        localMemoryBank.updateTrajectory({ ...entity, position: jitteredPos });
+        const history = localMemoryBank.getHistory(entity.id);
 
-        // Render the physical Entity
+        drawTrail(ctx, history, currentFrame.styleDNA.colors.primary);
         drawVisualEntity(ctx, entity, jitteredPos.x, jitteredPos.y, currentFrame);
       });
 
@@ -94,8 +142,6 @@ export function CanvasRenderer({
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
   }, [currentFrameIndex, frames]);
-
-  // --- RENDERING HELPERS ---
 
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
     if (points.length < 2) return;
@@ -113,90 +159,46 @@ export function CanvasRenderer({
     ctx.restore();
   };
 
-  const drawVisualEntity = (
-    ctx: CanvasRenderingContext2D, 
-    entity: Entity, 
-    x: number, 
-    y: number, 
-    frame: NarrativeFrame
-  ) => {
+  const drawVisualEntity = (ctx: CanvasRenderingContext2D, entity: Entity, x: number, y: number, frame: NarrativeFrame) => {
     const size = entity.size || 25;
     const moodIntensity = frame.emotion.intensity;
     const action = entity.state?.action as string;
 
     ctx.save();
-    
-    // Style from DNA + Action Logic
     ctx.shadowBlur = 20 * moodIntensity;
     ctx.shadowColor = frame.styleDNA.colors.accent;
     ctx.fillStyle = frame.styleDNA.colors.primary;
 
-    // Entity Body
     ctx.beginPath();
-    
-    // Switch shape/behavior based on backend "action"
     if (action === 'expand' || action === 'pulse') {
       const pulseScale = 1 + Math.sin(Date.now() / 200) * 0.15;
       ctx.arc(x, y, size * pulseScale, 0, Math.PI * 2);
     } else if (action === 'upend' || action === 'anger') {
-      // Draw a more "jagged" or square shape for aggressive actions
       ctx.rect(x - size, y - size, size * 2, size * 2);
     } else {
       ctx.arc(x, y, size, 0, Math.PI * 2);
     }
-    
     ctx.fill();
 
-    // Text Overlay (Character Name)
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 12px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.shadowBlur = 0; // Don't glow the text
     ctx.fillText(entity.label.toUpperCase(), x, y + size + 20);
 
-    // Visual Cue (The "What is happening" text from Railway)
     if (entity.state?.cue) {
       ctx.font = '500 10px Inter, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.fillText(entity.state.cue as string, x, y + size + 35);
     }
-
     ctx.restore();
   };
 
   return (
     <div className="relative w-full h-[600px] bg-[#020617] rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
-      <canvas 
-        ref={canvasRef} 
-        width={1200} 
-        height={800} 
-        className="w-full h-full object-cover" 
-      />
-      
-      {/* UI Overlay */}
-      <div className="absolute top-6 left-6 flex items-center gap-3">
-        <div className="flex flex-col">
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">
-            Current Phase
-          </span>
-          <span className="text-white font-medium">
-            {frames[currentFrameIndex]?.emotion.primary}
-          </span>
-        </div>
-      </div>
-
-      <div className="absolute bottom-6 right-8">
-         <div className="flex items-center gap-2">
-            <div className="h-1 w-24 bg-white/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-blue-500 transition-all duration-500" 
-                  style={{ width: `${(currentFrameIndex + 1) / frames.length * 100}%` }}
-                />
-            </div>
-            <span className="text-[10px] font-mono text-white/30">
-              {currentFrameIndex + 1} / {frames.length}
-            </span>
-         </div>
+      <canvas ref={canvasRef} width={1200} height={800} className="w-full h-full object-cover" />
+      <div className="absolute top-6 left-6 flex flex-col">
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">Phase</span>
+        <span className="text-white font-medium">{frames[currentFrameIndex]?.emotion.primary}</span>
       </div>
     </div>
   );
