@@ -1,23 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { MotionType, StoryboardScene } from '../types/storyboard';
-
-interface SafeZone {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  opacity: number;
-  phase: number;
-  emoji: string;
-}
+import { pathFinder } from '../utils/pathFinder';
 
 interface OverlayMotionProps {
   motionType: MotionType;
@@ -36,7 +19,6 @@ export default function OverlayMotion({
 }: OverlayMotionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
-  const particlesRef = useRef<Particle[]>([]);
   
   const emotionEmojis: Record<string, string[]> = {
     calm: ['🌊', '🍃', '☁️'],
@@ -60,104 +42,100 @@ export default function OverlayMotion({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isActive) return;
+    if (!canvas || !isActive || !scene) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const initParticles = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      
-      const w = canvas.width;
-      const h = canvas.height;
-      const count = Math.floor(40 * intensity);
-      
-      const zones: SafeZone[] = [
-        { x: 0, y: 0, width: w * 0.15, height: h },
-        { x: w * 0.85, y: 0, width: w * 0.15, height: h },
-      ];
-
-      const currentEmojis = emotionEmojis[emotion] || emotionEmojis.neutral;
-
-      particlesRef.current = Array.from({ length: count }, () => {
-        const zone = zones[Math.floor(Math.random() * zones.length)];
-        return {
-          x: zone.x + Math.random() * zone.width,
-          y: Math.random() * h,
-          vx: (Math.random() - 0.5) * intensity * 1.5,
-          vy: (Math.random() - 0.5) * intensity * 1.5,
-          size: Math.random() * 12 + 12, 
-          opacity: Math.random() * 0.3 + 0.1,
-          phase: Math.random() * Math.PI * 2,
-          emoji: currentEmojis[Math.floor(Math.random() * currentEmojis.length)]
-        };
-      });
-    };
-
     const handleResize = () => {
-      if (!canvas) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      initParticles(); // Re-init on resize to keep zones accurate
     };
 
     window.addEventListener('resize', handleResize);
-    initParticles();
+    handleResize();
 
-    let time = 0;
-    const animate = () => {
+    let startTime = performance.now();
+    // Use the duration from your Mongo storyboard or default to 3500ms
+    const duration = scene.duration || 3500;
+    
+    // Select the emoji based on emotion state
+    const currentEmojis = emotionEmojis[emotion] || emotionEmojis.neutral;
+    const actorEmoji = currentEmojis[0];
+
+    const animate = (currentTime: number) => {
       if (!ctx || !canvas) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      time += 0.016;
-      
-      const rgb = toneMap[emotion] || '148, 163, 184';
 
-      // 1. HUD RENDER
-      if (scene && scene.type) {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // 1. PATH FINDING (Using the whitespace hints from DB)
+      const hints = scene.layout_hints || [{ x: 0.5, y: 0.5 }];
+      const pos = pathFinder.getPointOnPath(hints, progress);
+      
+      const x = pos.x * canvas.width;
+      const y = pos.y * canvas.height;
+
+      // 2. STYLE DNA & MOTION FX
+      const rgb = toneMap[emotion] || '148, 163, 184';
+      let currentSize = 38 * (1 + intensity * 0.2);
+      let currentOpacity = 0.8;
+
+      // Apply Motion Patterns
+      if (motionType === 'breathe') {
+        const breatheFactor = Math.sin(currentTime / 600) * 0.15;
+        currentSize *= (1 + breatheFactor);
+      } else if (motionType === 'pulse') {
+        currentOpacity = 0.4 + Math.abs(Math.sin(currentTime / 300)) * 0.5;
+      }
+
+      // 3. DRAW PATH PREVIEW (Dotted line through whitespace)
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([4, 12]);
+      ctx.strokeStyle = `rgba(${rgb}, 0.2)`;
+      ctx.lineWidth = 1;
+      const pathPoints = pathFinder.generatePathPoints(hints, 25);
+      pathPoints.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x * canvas.width, p.y * canvas.height);
+        else ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
+      });
+      ctx.stroke();
+      ctx.restore();
+
+      // 4. RENDER EMOJI ACTOR
+      ctx.save();
+      ctx.font = `${currentSize}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = currentOpacity;
+      
+      // Add subtle glow based on emotion color
+      ctx.shadowBlur = 20 * intensity;
+      ctx.shadowColor = `rgba(${rgb}, 0.5)`;
+      
+      ctx.fillText(actorEmoji, x, y);
+      ctx.restore();
+
+      // 5. HUD RENDER (Status info)
+      if (scene.description) {
         ctx.save();
         const hudX = canvas.width * 0.89;
         const hudY = 120;
-        ctx.globalAlpha = 0.8;
-        ctx.fillStyle = `rgba(${rgb}, 1)`;
+        ctx.fillStyle = `rgba(${rgb}, 0.9)`;
         ctx.font = '900 10px Inter, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 25);
-        ctx.fillStyle = '#111111';
-        ctx.font = '600 18px Inter, sans-serif';
-        ctx.fillText(scene.name || 'Narrative Pulse', hudX, hudY);
+        ctx.textAlign = 'right';
+        ctx.fillText(`SEQ_${scene.sequence || 0}`, hudX, hudY - 25);
+        ctx.fillStyle = '#1e293b'; // Slate-800
+        ctx.font = '600 14px Inter, sans-serif';
+        ctx.fillText(emotion.toUpperCase(), hudX, hudY);
         ctx.restore();
       }
 
-      // 2. EMOJI ENGINE
-      particlesRef.current.forEach((p) => {
-        ctx.save();
-        
-        let currentOpacity = p.opacity;
-
-        if (motionType === 'breathe') {
-          const b = Math.sin(time * 0.8 + p.phase) * intensity;
-          currentOpacity = p.opacity * (1 + b * 0.4);
-          p.y += Math.sin(time * 0.5) * 0.2;
-        } else if (motionType === 'pulse') {
-          const pul = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
-          currentOpacity = p.opacity + (pul * 0.3);
-        } else {
-          p.y += p.vy * 0.3;
-          if (p.y > canvas.height) p.y = 0;
-          if (p.y < 0) p.y = canvas.height;
-        }
-
-        ctx.font = `${p.size}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.globalAlpha = Math.max(0, Math.min(1, currentOpacity));
-        ctx.fillText(p.emoji, p.x, p.y);
-        
-        ctx.restore();
-      });
-
-      animationRef.current = requestAnimationFrame(animate);
+      if (progress < 1) {
+        animationRef.current = requestAnimationFrame(animate);
+      }
     };
 
     animationRef.current = requestAnimationFrame(animate);
@@ -166,37 +144,33 @@ export default function OverlayMotion({
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       window.removeEventListener('resize', handleResize);
     };
-  }, [motionType, intensity, emotion, isActive, scene]);
+  }, [isActive, scene, emotion, motionType, intensity]);
 
   if (!isActive) return null;
 
   return (
     <>
+      {/* UI Indicator Overlay */}
       <div className="fixed top-6 right-6 z-[60] flex items-center gap-3 pointer-events-none select-none">
         <div className="flex flex-col items-end">
-          <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full border border-slate-200 shadow-sm">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
             <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
-              Engine Live
+              Path Live
             </span>
           </div>
-          <span className="text-[9px] font-mono text-slate-400 mt-1 mr-2 bg-white/40 px-1">
-            {motionType.toUpperCase()} // {emotion.toUpperCase()}
-          </span>
         </div>
       </div>
 
       <canvas
         ref={canvasRef}
-        className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
+        className="fixed inset-0 pointer-events-none z-50"
         style={{ 
-          mixBlendMode: 'normal', 
-          opacity: 0.8,
           background: 'transparent',
-          backdropFilter: 'contrast(1.01) brightness(1.01)'
+          backdropFilter: 'contrast(1.02)'
         }}
       />
     </>
