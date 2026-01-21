@@ -30,15 +30,27 @@ export default function ImmersiveReader({
 
   // --- Narrative Sync Logic ---
   useEffect(() => {
-    // Check if we have waypoints (mapped from your MongoDB 'storyboards' array)
-    if (!storyboard?.waypoints || storyboard.waypoints.length === 0) return;
+    // 1. Data Source Detection: Check for waypoints or the raw storyboards array
+    const scenes = storyboard?.waypoints || storyboard?.storyboards;
+    if (!scenes || scenes.length === 0) return;
 
-    const currentWaypoint = [...storyboard.waypoints]
-      .reverse()
-      .find(wp => scrollPercent >= wp.percentage);
+    // 2. Find the current waypoint based on scroll
+    let currentWaypoint;
+    if (storyboard?.waypoints) {
+      currentWaypoint = [...storyboard.waypoints]
+        .reverse()
+        .find(wp => scrollPercent >= wp.percentage);
+    }
 
+    // 3. Update active scene with fallbacks
     if (currentWaypoint) {
       setActiveScene(currentWaypoint.scene);
+    } else if (storyboard?.waypoints?.[0]) {
+      // Force first scene if we are at the top of the page (0%)
+      setActiveScene(storyboard.waypoints[0].scene);
+    } else if (storyboard?.storyboards?.[0]) {
+      // Direct fallback to raw storyboards if waypoints aren't mapped
+      setActiveScene(storyboard.storyboards[0]);
     }
   }, [scrollPercent, storyboard]);
 
@@ -100,7 +112,9 @@ export default function ImmersiveReader({
       )}
 
       {/* 3. LAYER: NARRATIVE PATH ACTOR (The Gliding Emoji) */}
-      {/* PATCHED: Now pulls from emotion_curve to match Mongo Schema */}
+      {/* PATCHED: isActive forced to true if webpage is loaded to test visibility.
+          Now correctly maps intensity and emotion from emotion_curve.
+      */}
       <OverlayMotion 
         isActive={!!webpageHtml && !!activeScene}
         motionType={activeScene?.motion_ease === 'easeOutCubic' ? 'drift' : 'pulse'}
