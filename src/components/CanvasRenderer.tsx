@@ -45,22 +45,19 @@ const applyEmotionalJitter = (pos: {x: number, y: number}, intensity: number, ti
   return { x: pos.x + jitter, y: pos.y + jitter };
 };
 
-// --- MEMORY BANK (Throttled to prevent Supabase 409 Conflicts) ---
+// --- MEMORY BANK ---
 const historyCache: Record<string, {x: number, y: number}[]> = {};
 let lastPersistenceTime = 0;
 
 const localMemoryBank = {
   updateTrajectory: (id: string, pos: {x: number, y: number}) => {
-    // 1. Update local visual history (runs every frame for smooth trails)
     if (!historyCache[id]) historyCache[id] = [];
     historyCache[id].push({ ...pos });
     if (historyCache[id].length > 25) historyCache[id].shift();
 
-    // 2. Throttle potential Database "Stitching" 
     const now = Date.now();
     if (now - lastPersistenceTime > 2000) {
-      // This is where you'd call supabase.from('memory_bank').upsert(...)
-      // By keeping it inside this timer, you avoid the 409/400 error loop.
+      // Database logic would go here, throttled to 2 seconds
       lastPersistenceTime = now;
     }
   },
@@ -100,8 +97,8 @@ export function CanvasRenderer({
       const easeFn = Easing[easeKey] || Easing.linear;
       const easedProgress = easeFn(progress);
 
-      // Stage Setup (Dark Background from Style DNA)
-      ctx.globalAlpha = 0.15; // Lower alpha creates a "motion blur" trail effect
+      // Clean Stage with Style DNA background
+      ctx.globalAlpha = 0.15;
       ctx.fillStyle = currentFrame.style_dna?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
@@ -110,11 +107,9 @@ export function CanvasRenderer({
         currentFrame.action_beats.forEach((beat, index) => {
           const hint = currentFrame.layout_hints[index] || { x: 0.5, y: 0.5 };
           
-          // Coordinate Mapping
           const targetX = hint.x * 2000;
           const targetY = hint.y * 1200;
           
-          // Interpolate position
           const x = 1000 + (targetX - 1000) * easedProgress;
           const y = 600 + (targetY - 600) * easedProgress;
 
@@ -143,16 +138,16 @@ export function CanvasRenderer({
     };
   }, [currentFrameIndex, frames, onFrameComplete]);
 
-  // --- HELPERS ---
+  // --- HELPERS (PARTICLE LOGIC REMOVED) ---
 
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
     if (points.length < 2) return;
     ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
-    ctx.setLineDash([2, 10]); 
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.3;
+    ctx.setLineDash([2, 8]); 
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.2; // Very subtle history trail
     points.forEach((p, i) => {
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
@@ -164,7 +159,7 @@ export function CanvasRenderer({
   const drawVisualEntity = (ctx: CanvasRenderingContext2D, label: string, action: string, x: number, y: number, frame: NarrativeFrame) => {
     const moodIntensity = frame.emotion_curve?.intensity || 0.5;
 
-    // --- EMOJI MAPPING ---
+    // --- PURE EMOJI MAPPING (NO PARTICLES) ---
     const actionEmojiMap: Record<string, string> = {
       write: '✍️',
       revise: '📝',
@@ -173,34 +168,35 @@ export function CanvasRenderer({
       think: '🧠',
       talk: '💬',
       joy: '✨',
-      default: '💠'
+      pulse: '🌀',
+      default: '💠' // Standard "Stitch" Diamond
     };
 
     const emoji = actionEmojiMap[action] || actionEmojiMap.default;
 
     ctx.save();
     
-    // Aesthetic Glow
-    ctx.shadowBlur = 25 * moodIntensity;
+    // Aesthetic Glow based on intensity
+    ctx.shadowBlur = 20 * moodIntensity;
     ctx.shadowColor = frame.style_dna?.colors?.accent || '#ffffff';
 
-    // Animation: Pulse effect for active beats
+    // Pulse animation for specific actions
     const pulse = (action === 'write' || action === 'revise' || moodIntensity > 0.8) 
-      ? 1 + Math.sin(Date.now() / 200) * 0.15 
+      ? 1 + Math.sin(Date.now() / 200) * 0.12 
       : 1;
 
-    // Draw Emoji
-    ctx.font = `${45 * pulse}px serif`;
+    // Render Emoji as the primary actor
+    ctx.font = `${48 * pulse}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(emoji, x, y);
 
-    // Label Styling
+    // Dynamic Labeling
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 16px "Inter", sans-serif';
-    ctx.shadowBlur = 0; // Disable shadow for text clarity
-    ctx.globalAlpha = 0.9;
-    ctx.fillText(label.toUpperCase(), x, y + 50);
+    ctx.globalAlpha = 0.8;
+    ctx.shadowBlur = 0; 
+    ctx.fillText(label.toUpperCase(), x, y + 55);
     
     ctx.restore();
   };
