@@ -3,40 +3,66 @@ export type MotionType = 'drift' | 'breathe' | 'pulse' | 'jitter';
 export interface Point {
   x: number;
   y: number;
+  label?: string; // Matches your Mongo "label": "whitespace"
 }
 
 export interface StoryboardScene {
-  type: 'character' | 'location' | 'object' | 'emotion' | 'action';
-  name?: string;
-  content: string;
-  position: 'left' | 'right' | 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
-  animation: 'fadeSlideIn' | 'scaleIn' | 'bounceIn' | 'slideUp' | 'ripple';
+  storyboard_id: string;
+  sequence: number;
+  description: string;
   
-  // --- Path-Finder & Emotion Extensions ---
-  emotion: string;           // e.g., 'joyful', 'tense', 'calm'
-  intensity: number;         // 0.0 to 1.0
-  layout_hints: Point[];     // The whitespace coordinates from MongoDB
-  duration?: number;         // Duration of the animation sequence
-  sequence?: number;         // The order of appearance
-  frameIndex?: number;       // Links to the CanvasRenderer background frame
+  // Matches Mongo: emotion_curve { primary, intensity, valence }
+  emotion_curve: {
+    primary: string;   // This replaces the old 'emotion' string
+    intensity: number; // This replaces the old 'intensity' number
+    valence: number;
+  };
+
+  // Matches Mongo: layout_hints array
+  layout_hints: Point[];
   
-  color?: string;
+  // Matches Mongo: style_dna object
+  style_dna: {
+    colors: {
+      primary: string;
+      secondary: string;
+      accent: string;
+    };
+    motionEase: string;
+    particle_count: number;
+  };
+
+  duration: number;
+  motion_ease: string;
+  
+  // Optional UI fields (keep these for the frontend logic)
+  type?: 'character' | 'location' | 'object' | 'emotion' | 'action';
+  frameIndex?: number;
   textSegment?: string;
-  description?: string;
 }
 
+// This represents a single Waypoint in the scroll logic
 export interface ScrollWaypoint {
   id: string;
-  percentage: number;        // Changed from scrollPercent to match ImmersiveReader logic
+  percentage: number; 
   scene: StoryboardScene;
 }
 
+// Matches your Root Mongo Document
 export interface Storyboard {
+  _id?: { $oid: string };
   article_id: string;
-  url: string;
-  title?: string;
+  job_id: string;
+  status: string;
+  original_text: string;
+  
+  // NOTE: Your Mongo uses "storyboards" (plural), 
+  // but your Waypoint logic likely needs to map these into waypoints.
+  storyboards: StoryboardScene[]; 
+  
+  // Existing frontend fields
   waypoints: ScrollWaypoint[];
-  frames?: any[];            // Used by CanvasRenderer for background shapes
+  frames?: any[]; 
   createdAt?: string;
 }
 
