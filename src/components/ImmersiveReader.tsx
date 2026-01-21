@@ -32,6 +32,7 @@ export default function ImmersiveReader({
   useEffect(() => {
     if (!storyboard?.waypoints || storyboard.waypoints.length === 0) return;
 
+    // Find the current scene based on scroll percentage
     const currentWaypoint = [...storyboard.waypoints]
       .reverse()
       .find(wp => scrollPercent >= wp.percentage);
@@ -59,23 +60,12 @@ export default function ImmersiveReader({
       className="h-screen w-full relative overflow-hidden bg-white" 
       onMouseMove={handleMouseMove}
     >
-      {/* 1. LAYER: MOOD ENGINE (OverlayMotion) */}
-      <OverlayMotion 
-        isActive={!!webpageHtml}
-        motionType={activeScene?.type === 'action' ? 'pulse' : 'drift'}
-        intensity={activeScene?.intensity || 0.4}
-        emotion={activeScene?.emotion || 'neutral'}
-        scene={activeScene}
-      />
-
-      {/* 2. LAYER: THE ARTICLE (The Sandboxed Environment) */}
+      {/* 1. LAYER: THE ARTICLE (Base Layer) */}
       <div 
         className={`relative z-10 h-full p-0 transition-all duration-1000 ease-in-out ${
-          // PATCHED: Removed opacity-30, grayscale, and blur filters
           storyboard ? 'opacity-100 scale-100' : 'opacity-100 scale-100'
         }`}
       >
-        {/* PATCHED: Removed bg-slate-900/10 and backdrop-blur-sm */}
         <div className="w-full h-full flex flex-col overflow-hidden">
           <div className="relative w-full h-full">
             {webpageHtml ? (
@@ -102,7 +92,7 @@ export default function ImmersiveReader({
         </div>
       </div>
 
-      {/* 3. LAYER: PARALLEL MOTION STAGE (CanvasRenderer) */}
+      {/* 2. LAYER: PARALLEL MOTION STAGE (Background Effects) */}
       {storyboard && (
         <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
            <CanvasRenderer 
@@ -113,8 +103,20 @@ export default function ImmersiveReader({
         </div>
       )}
 
+      {/* 3. LAYER: NARRATIVE PATH ACTOR (The Gliding Emoji) */}
+      {/* We place this here so it has a high visual priority. 
+          The 'scene' prop now contains layout_hints for the PathFinder.
+      */}
+      <OverlayMotion 
+        isActive={!!webpageHtml && !!activeScene}
+        motionType={activeScene?.type === 'action' ? 'pulse' : 'drift'}
+        intensity={activeScene?.intensity || 0.4}
+        emotion={activeScene?.emotion || 'neutral'}
+        scene={activeScene}
+      />
+
       {/* 4. LAYER: INTERACTIVE HUD & PROCESSING */}
-      <div className="absolute inset-0 z-30 pointer-events-none">
+      <div className="absolute inset-0 z-50 pointer-events-none">
         
         {isProcessing && (
           <div className="absolute inset-0 bg-white/90 backdrop-blur-xl flex flex-col items-center justify-center pointer-events-auto">
@@ -171,7 +173,6 @@ export default function ImmersiveReader({
         )}
       </div>
 
-      {/* PATCHED: Removed the shadow-[inset_0_0_150px_rgba(0,0,0,0.8)] vignette layer */}
       <div className="absolute inset-0 pointer-events-none z-[25]" />
     </div>
   );
