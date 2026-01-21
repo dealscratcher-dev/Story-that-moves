@@ -12,7 +12,6 @@ export interface Entity {
   };
 }
 
-// Updated to reflect the actual MongoDB structure provided
 export interface NarrativeFrame {
   sequence: number;
   description: string;
@@ -42,17 +41,28 @@ const Easing = {
 
 const applyEmotionalJitter = (pos: {x: number, y: number}, intensity: number, time: number) => {
   if (!intensity || intensity < 0.2) return pos;
-  const jitter = Math.sin(time * 0.1) * (intensity * 15); // Increased for visibility
+  const jitter = Math.sin(time * 0.1) * (intensity * 15); 
   return { x: pos.x + jitter, y: pos.y + jitter };
 };
 
-// --- MEMORY BANK ---
+// --- MEMORY BANK (Throttled to prevent Supabase 409 Conflicts) ---
 const historyCache: Record<string, {x: number, y: number}[]> = {};
+let lastPersistenceTime = 0;
+
 const localMemoryBank = {
   updateTrajectory: (id: string, pos: {x: number, y: number}) => {
+    // 1. Update local visual history (runs every frame for smooth trails)
     if (!historyCache[id]) historyCache[id] = [];
     historyCache[id].push({ ...pos });
     if (historyCache[id].length > 25) historyCache[id].shift();
+
+    // 2. Throttle potential Database "Stitching" 
+    const now = Date.now();
+    if (now - lastPersistenceTime > 2000) {
+      // This is where you'd call supabase.from('memory_bank').upsert(...)
+      // By keeping it inside this timer, you avoid the 409/400 error loop.
+      lastPersistenceTime = now;
+    }
   },
   getHistory: (id: string) => historyCache[id] || []
 };
@@ -86,27 +96,25 @@ export function CanvasRenderer({
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
       
-      // Safety lookup for Easing function
       const easeKey = (currentFrame.motion_ease || currentFrame.style_dna?.motionEase) as keyof typeof Easing;
       const easeFn = Easing[easeKey] || Easing.linear;
       const easedProgress = easeFn(progress);
 
-      // Stage Setup
-      ctx.globalAlpha = 0.2;
+      // Stage Setup (Dark Background from Style DNA)
+      ctx.globalAlpha = 0.15; // Lower alpha creates a "motion blur" trail effect
       ctx.fillStyle = currentFrame.style_dna?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1.0;
 
-      // Translate action_beats and layout_hints into visual motion
       if (currentFrame.action_beats && Array.isArray(currentFrame.action_beats)) {
         currentFrame.action_beats.forEach((beat, index) => {
           const hint = currentFrame.layout_hints[index] || { x: 0.5, y: 0.5 };
           
-          // Map 0.0-1.0 coordinate system to 2000x1200 canvas
+          // Coordinate Mapping
           const targetX = hint.x * 2000;
           const targetY = hint.y * 1200;
           
-          // Simple interpolation from a center start point
+          // Interpolate position
           const x = 1000 + (targetX - 1000) * easedProgress;
           const y = 600 + (targetY - 600) * easedProgress;
 
@@ -136,14 +144,15 @@ export function CanvasRenderer({
   }, [currentFrameIndex, frames, onFrameComplete]);
 
   // --- HELPERS ---
+
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
     if (points.length < 2) return;
     ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
-    ctx.setLineDash([5, 15]); 
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.4;
+    ctx.setLineDash([2, 10]); 
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.3;
     points.forEach((p, i) => {
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
@@ -153,31 +162,46 @@ export function CanvasRenderer({
   };
 
   const drawVisualEntity = (ctx: CanvasRenderingContext2D, label: string, action: string, x: number, y: number, frame: NarrativeFrame) => {
-    const size = 30;
     const moodIntensity = frame.emotion_curve?.intensity || 0.5;
 
+    // --- EMOJI MAPPING ---
+    const actionEmojiMap: Record<string, string> = {
+      write: '✍️',
+      revise: '📝',
+      anger: '💢',
+      severe: '⚠️',
+      think: '🧠',
+      talk: '💬',
+      joy: '✨',
+      default: '💠'
+    };
+
+    const emoji = actionEmojiMap[action] || actionEmojiMap.default;
+
     ctx.save();
-    ctx.shadowBlur = 30 * moodIntensity;
+    
+    // Aesthetic Glow
+    ctx.shadowBlur = 25 * moodIntensity;
     ctx.shadowColor = frame.style_dna?.colors?.accent || '#ffffff';
-    ctx.fillStyle = frame.style_dna?.colors?.primary || '#3b82f6';
 
-    ctx.beginPath();
-    // Visual polymorphism based on the "action"
-    if (action === 'write' || action === 'revise') {
-      const pulse = 1 + Math.sin(Date.now() / 150) * 0.2;
-      ctx.arc(x, y, size * pulse, 0, Math.PI * 2);
-    } else if (action === 'anger' || action === 'severe') {
-      ctx.rect(x - size, y - size, size * 2, size * 2);
-    } else {
-      ctx.arc(x, y, size, 0, Math.PI * 2);
-    }
-    ctx.fill();
+    // Animation: Pulse effect for active beats
+    const pulse = (action === 'write' || action === 'revise' || moodIntensity > 0.8) 
+      ? 1 + Math.sin(Date.now() / 200) * 0.15 
+      : 1;
 
-    // Label
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 14px Inter, sans-serif';
+    // Draw Emoji
+    ctx.font = `${45 * pulse}px serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(label.toUpperCase(), x, y + size + 25);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, x, y);
+
+    // Label Styling
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 16px "Inter", sans-serif';
+    ctx.shadowBlur = 0; // Disable shadow for text clarity
+    ctx.globalAlpha = 0.9;
+    ctx.fillText(label.toUpperCase(), x, y + 50);
+    
     ctx.restore();
   };
 
