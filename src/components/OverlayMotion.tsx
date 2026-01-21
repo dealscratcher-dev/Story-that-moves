@@ -47,95 +47,90 @@ export default function OverlayMotion({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Set canvas dimensions immediately
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
     const handleResize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     };
 
     window.addEventListener('resize', handleResize);
-    handleResize();
 
-    let startTime = performance.now();
-    // Use the duration from your Mongo storyboard or default to 3500ms
+    // IMPORTANT: Reset startTime to null so it captures the first frame of the new scene
+    let startTime: number | null = null;
     const duration = scene.duration || 3500;
-    
-    // Select the emoji based on emotion state
     const currentEmojis = emotionEmojis[emotion] || emotionEmojis.neutral;
     const actorEmoji = currentEmojis[0];
 
     const animate = (currentTime: number) => {
       if (!ctx || !canvas) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!startTime) startTime = currentTime; // Lock the start time on first frame
 
       const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
+      // We use a small epsilon to ensure it doesn't vanish at the very end
+      const progress = Math.min(elapsed / duration, 0.99); 
       
-      // 1. PATH FINDING (Using the whitespace hints from DB)
-      const hints = scene.layout_hints || [{ x: 0.5, y: 0.5 }];
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1. PATH DATA
+      const hints = scene.layout_hints && scene.layout_hints.length > 0 
+        ? scene.layout_hints 
+        : [{ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.6 }]; // Fallback path
+      
       const pos = pathFinder.getPointOnPath(hints, progress);
-      
       const x = pos.x * canvas.width;
       const y = pos.y * canvas.height;
 
-      // 2. STYLE DNA & MOTION FX
       const rgb = toneMap[emotion] || '148, 163, 184';
-      let currentSize = 38 * (1 + intensity * 0.2);
-      let currentOpacity = 0.8;
+      let currentSize = 45 * (1 + intensity * 0.2); // Made slightly larger
+      let currentOpacity = 0.9;
 
-      // Apply Motion Patterns
+      // 2. MOTION FX
       if (motionType === 'breathe') {
-        const breatheFactor = Math.sin(currentTime / 600) * 0.15;
-        currentSize *= (1 + breatheFactor);
+        currentSize *= (1 + Math.sin(currentTime / 600) * 0.1);
       } else if (motionType === 'pulse') {
-        currentOpacity = 0.4 + Math.abs(Math.sin(currentTime / 300)) * 0.5;
+        currentOpacity = 0.6 + Math.abs(Math.sin(currentTime / 300)) * 0.4;
       }
 
-      // 3. DRAW PATH PREVIEW (Dotted line through whitespace)
+      // 3. DRAW DOTTED PATH
       ctx.save();
       ctx.beginPath();
-      ctx.setLineDash([4, 12]);
-      ctx.strokeStyle = `rgba(${rgb}, 0.2)`;
-      ctx.lineWidth = 1;
-      const pathPoints = pathFinder.generatePathPoints(hints, 25);
-      pathPoints.forEach((p, i) => {
+      ctx.setLineDash([5, 15]);
+      ctx.strokeStyle = `rgba(${rgb}, 0.3)`;
+      const previewPoints = pathFinder.generatePathPoints(hints, 20);
+      previewPoints.forEach((p, i) => {
         if (i === 0) ctx.moveTo(p.x * canvas.width, p.y * canvas.height);
         else ctx.lineTo(p.x * canvas.width, p.y * canvas.height);
       });
       ctx.stroke();
       ctx.restore();
 
-      // 4. RENDER EMOJI ACTOR
+      // 4. RENDER ACTOR
       ctx.save();
       ctx.font = `${currentSize}px serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.globalAlpha = currentOpacity;
-      
-      // Add subtle glow based on emotion color
-      ctx.shadowBlur = 20 * intensity;
+      ctx.shadowBlur = 15;
       ctx.shadowColor = `rgba(${rgb}, 0.5)`;
       
-      ctx.fillText(actorEmoji, x, y);
+      // Safety check: ensure coordinates are valid numbers
+      if (!isNaN(x) && !isNaN(y)) {
+        ctx.fillText(actorEmoji, x, y);
+      }
       ctx.restore();
 
-      // 5. HUD RENDER (Status info)
-      if (scene.description) {
-        ctx.save();
-        const hudX = canvas.width * 0.89;
-        const hudY = 120;
-        ctx.fillStyle = `rgba(${rgb}, 0.9)`;
-        ctx.font = '900 10px Inter, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(`SEQ_${scene.sequence || 0}`, hudX, hudY - 25);
-        ctx.fillStyle = '#1e293b'; // Slate-800
-        ctx.font = '600 14px Inter, sans-serif';
-        ctx.fillText(emotion.toUpperCase(), hudX, hudY);
-        ctx.restore();
-      }
+      // 5. HUD INFO
+      ctx.save();
+      ctx.fillStyle = `rgba(${rgb}, 0.8)`;
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(emotion.toUpperCase(), canvas.width - 40, 100);
+      ctx.restore();
 
-      if (progress < 1) {
-        animationRef.current = requestAnimationFrame(animate);
-      }
+      animationRef.current = requestAnimationFrame(animate);
     };
 
     animationRef.current = requestAnimationFrame(animate);
@@ -149,30 +144,10 @@ export default function OverlayMotion({
   if (!isActive) return null;
 
   return (
-    <>
-      {/* UI Indicator Overlay */}
-      <div className="fixed top-6 right-6 z-[60] flex items-center gap-3 pointer-events-none select-none">
-        <div className="flex flex-col items-end">
-          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full border border-slate-200 shadow-sm">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
-              Path Live
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <canvas
-        ref={canvasRef}
-        className="fixed inset-0 pointer-events-none z-50"
-        style={{ 
-          background: 'transparent',
-          backdropFilter: 'contrast(1.02)'
-        }}
-      />
-    </>
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-[100]" // Increased z-index
+      style={{ background: 'transparent' }}
+    />
   );
 }
