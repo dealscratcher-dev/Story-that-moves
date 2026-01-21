@@ -16,7 +16,7 @@ interface Particle {
   size: number;
   opacity: number;
   phase: number;
-  emoji: string; // Added emoji property
+  emoji: string;
 }
 
 interface OverlayMotionProps {
@@ -38,7 +38,6 @@ export default function OverlayMotion({
   const animationRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
   
-  // Emoji Mapping based on Emotion
   const emotionEmojis: Record<string, string[]> = {
     calm: ['🌊', '🍃', '☁️'],
     tense: ['⚡', '🔥', '💥'],
@@ -72,7 +71,7 @@ export default function OverlayMotion({
       
       const w = canvas.width;
       const h = canvas.height;
-      const count = Math.floor(40 * intensity); // Slightly fewer for text performance
+      const count = Math.floor(40 * intensity);
       
       const zones: SafeZone[] = [
         { x: 0, y: 0, width: w * 0.15, height: h },
@@ -88,10 +87,10 @@ export default function OverlayMotion({
           y: Math.random() * h,
           vx: (Math.random() - 0.5) * intensity * 1.5,
           vy: (Math.random() - 0.5) * intensity * 1.5,
-          size: Math.random() * 10 + 10, // Font size for emojis
+          size: Math.random() * 12 + 12, 
           opacity: Math.random() * 0.3 + 0.1,
           phase: Math.random() * Math.PI * 2,
-          emoji: currentEmojis[Math.floor(Math.random() * currentEmojis.currentEmojis.length)]
+          emoji: currentEmojis[Math.floor(Math.random() * currentEmojis.length)]
         };
       });
     };
@@ -100,6 +99,7 @@ export default function OverlayMotion({
       if (!canvas) return;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      initParticles(); // Re-init on resize to keep zones accurate
     };
 
     window.addEventListener('resize', handleResize);
@@ -113,7 +113,7 @@ export default function OverlayMotion({
       
       const rgb = toneMap[emotion] || '148, 163, 184';
 
-      // 1. HUD RENDER (Status info)
+      // 1. HUD RENDER
       if (scene && scene.type) {
         ctx.save();
         const hudX = canvas.width * 0.89;
@@ -121,6 +121,7 @@ export default function OverlayMotion({
         ctx.globalAlpha = 0.8;
         ctx.fillStyle = `rgba(${rgb}, 1)`;
         ctx.font = '900 10px Inter, sans-serif';
+        ctx.textAlign = 'left';
         ctx.fillText(scene.type.toUpperCase(), hudX, hudY - 25);
         ctx.fillStyle = '#111111';
         ctx.font = '600 18px Inter, sans-serif';
@@ -128,29 +129,29 @@ export default function OverlayMotion({
         ctx.restore();
       }
 
-      // 2. EMOJI ENGINE (Replaces Particle Engine)
+      // 2. EMOJI ENGINE
       particlesRef.current.forEach((p) => {
         ctx.save();
         
-        // Handle Motion Logic
+        let currentOpacity = p.opacity;
+
         if (motionType === 'breathe') {
           const b = Math.sin(time * 0.8 + p.phase) * intensity;
-          ctx.globalAlpha = p.opacity * (1 + b * 0.4);
+          currentOpacity = p.opacity * (1 + b * 0.4);
           p.y += Math.sin(time * 0.5) * 0.2;
         } else if (motionType === 'pulse') {
           const pul = Math.abs(Math.sin(time * 2 + p.phase)) * intensity;
-          ctx.globalAlpha = p.opacity + (pul * 0.3);
+          currentOpacity = p.opacity + (pul * 0.3);
         } else {
           p.y += p.vy * 0.3;
           if (p.y > canvas.height) p.y = 0;
           if (p.y < 0) p.y = canvas.height;
         }
 
-        // --- DRAW EMOJI INSTEAD OF CIRCLE ---
         ctx.font = `${p.size}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.globalAlpha = ctx.globalAlpha * p.opacity; // Compound opacity
+        ctx.globalAlpha = Math.max(0, Math.min(1, currentOpacity));
         ctx.fillText(p.emoji, p.x, p.y);
         
         ctx.restore();
@@ -192,7 +193,7 @@ export default function OverlayMotion({
         ref={canvasRef}
         className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
         style={{ 
-          mixBlendMode: 'normal', // Changed from multiply to keep emoji colors clear
+          mixBlendMode: 'normal', 
           opacity: 0.8,
           background: 'transparent',
           backdropFilter: 'contrast(1.01) brightness(1.01)'
