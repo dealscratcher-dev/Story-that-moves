@@ -20,7 +20,9 @@ export default function OverlayMotion({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
 
+  // Mapping MongoDB emotion strings to Emojis
   const emotionEmojis: Record<string, string[]> = {
+    fear: ['😨', '🌑', '👻'], // Added 'fear' to match your Mongo schema
     calm: ['🌊', '🍃', '☁️'],
     tense: ['⚡', '🔥', '💥'],
     exciting: ['✨', '🚀', '🎉'],
@@ -31,7 +33,6 @@ export default function OverlayMotion({
   };
 
   useEffect(() => {
-    // 1. Critical Initialization
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -40,7 +41,6 @@ export default function OverlayMotion({
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      console.log("Canvas Resized to:", canvas.width, canvas.height);
     };
 
     window.addEventListener('resize', resize);
@@ -49,46 +49,52 @@ export default function OverlayMotion({
     let startTime = performance.now();
 
     const animate = (time: number) => {
-      // 2. Clear Screen
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // DATA SAFETY CHECK
       if (isActive && scene) {
-        const elapsed = time - startTime;
-        const duration = scene.duration || 3500;
-        const progress = (elapsed % duration) / duration; // Continuous Loop
-
-        // 3. Get Path Data
+        // 1. EXTRACT NESTED DATA FROM MONGO SCHEMA
+        // We check scene.emotion_curve.primary first, then fallback to props
+        const activeEmotion = scene.emotion_curve?.primary || emotion || 'neutral';
+        const activeIntensity = scene.emotion_curve?.intensity || intensity || 0.5;
         const hints = scene.layout_hints && scene.layout_hints.length > 0 
           ? scene.layout_hints 
-          : [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }]; // Diagonal Fallback
+          : [{ x: 0.5, y: 0.5 }]; // Center fallback
 
+        const elapsed = time - startTime;
+        const duration = scene.duration || 4000;
+        const progress = (elapsed % duration) / duration; 
+
+        // 2. PATHFINDING
         const pos = pathFinder.getPointOnPath(hints, progress);
-        
-        // 4. Transform to Pixels
         const x = pos.x * canvas.width;
         const y = pos.y * canvas.height;
 
-        // 5. Draw Emoji
-        const emojis = emotionEmojis[emotion] || emotionEmojis.neutral;
+        // 3. SELECT EMOJI
+        const emojis = emotionEmojis[activeEmotion] || emotionEmojis.neutral;
+        const actor = emojis[0];
+
+        // 4. RENDERING
         ctx.save();
-        ctx.font = '50px serif'; // Large size for visibility
+        
+        // Motion FX based on intensity
+        const pulse = motionType === 'pulse' ? Math.sin(time / 300) * 10 : 0;
+        const size = 50 + (activeIntensity * 20) + pulse;
+
+        ctx.font = `${size}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
-        // Shadow for contrast against iframe text
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = 'rgba(255, 255, 255, 1)';
+        // Glow Effect
+        ctx.shadowBlur = 20 * activeIntensity;
+        ctx.shadowColor = 'white';
         
-        ctx.fillText(emojis[0], x, y);
+        // Final Draw
+        if (!isNaN(x) && !isNaN(y)) {
+          ctx.fillText(actor, x, y);
+        }
+        
         ctx.restore();
-
-        // 6. Debug: If you see this red dot, the pathfinder is working
-        /*
-        ctx.fillStyle = 'red';
-        ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
-        ctx.fill();
-        */
       }
 
       requestRef.current = requestAnimationFrame(animate);
@@ -100,7 +106,7 @@ export default function OverlayMotion({
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [isActive, scene, emotion]);
+  }, [isActive, scene, emotion, motionType, intensity]);
 
   return (
     <canvas
@@ -108,9 +114,11 @@ export default function OverlayMotion({
       id="narrative-canvas-layer"
       className="fixed inset-0 pointer-events-none"
       style={{ 
-        zIndex: 99999, // Force to the absolute front
+        zIndex: 99999, 
         display: isActive ? 'block' : 'none',
-        background: 'transparent'
+        background: 'transparent',
+        // Contrast enhancement to see over article text
+        filter: 'drop-shadow(0px 0px 10px rgba(255,255,255,0.8))'
       }}
     />
   );
