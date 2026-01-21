@@ -30,9 +30,9 @@ export default function ImmersiveReader({
 
   // --- Narrative Sync Logic ---
   useEffect(() => {
+    // Check if we have waypoints (mapped from your MongoDB 'storyboards' array)
     if (!storyboard?.waypoints || storyboard.waypoints.length === 0) return;
 
-    // Find the current scene based on scroll percentage
     const currentWaypoint = [...storyboard.waypoints]
       .reverse()
       .find(wp => scrollPercent >= wp.percentage);
@@ -61,11 +61,7 @@ export default function ImmersiveReader({
       onMouseMove={handleMouseMove}
     >
       {/* 1. LAYER: THE ARTICLE (Base Layer) */}
-      <div 
-        className={`relative z-10 h-full p-0 transition-all duration-1000 ease-in-out ${
-          storyboard ? 'opacity-100 scale-100' : 'opacity-100 scale-100'
-        }`}
-      >
+      <div className="relative z-10 h-full p-0 transition-all duration-1000 ease-in-out">
         <div className="w-full h-full flex flex-col overflow-hidden">
           <div className="relative w-full h-full">
             {webpageHtml ? (
@@ -104,20 +100,17 @@ export default function ImmersiveReader({
       )}
 
       {/* 3. LAYER: NARRATIVE PATH ACTOR (The Gliding Emoji) */}
-      {/* We place this here so it has a high visual priority. 
-          The 'scene' prop now contains layout_hints for the PathFinder.
-      */}
+      {/* PATCHED: Now pulls from emotion_curve to match Mongo Schema */}
       <OverlayMotion 
         isActive={!!webpageHtml && !!activeScene}
-        motionType={activeScene?.type === 'action' ? 'pulse' : 'drift'}
-        intensity={activeScene?.intensity || 0.4}
-        emotion={activeScene?.emotion || 'neutral'}
+        motionType={activeScene?.motion_ease === 'easeOutCubic' ? 'drift' : 'pulse'}
+        intensity={activeScene?.emotion_curve?.intensity || 0.4}
+        emotion={activeScene?.emotion_curve?.primary || 'neutral'}
         scene={activeScene}
       />
 
       {/* 4. LAYER: INTERACTIVE HUD & PROCESSING */}
       <div className="absolute inset-0 z-50 pointer-events-none">
-        
         {isProcessing && (
           <div className="absolute inset-0 bg-white/90 backdrop-blur-xl flex flex-col items-center justify-center pointer-events-auto">
             <div className="relative">
@@ -135,7 +128,6 @@ export default function ImmersiveReader({
             showControls ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'
           }`}>
             <div className="bg-white/80 backdrop-blur-3xl border border-slate-200 rounded-[2rem] px-8 py-4 flex items-center gap-8 shadow-[0_20px_50px_rgba(0,0,0,0.1)] min-w-[500px]">
-              
               <button 
                 onClick={scrollToTop} 
                 className="p-2 text-slate-400 hover:text-emerald-500 transition-colors bg-slate-50 rounded-xl"
@@ -147,7 +139,7 @@ export default function ImmersiveReader({
                 <div className="flex justify-between text-[10px] font-black font-mono text-slate-500 uppercase tracking-widest">
                   <span className="flex items-center gap-2">
                     <div className={`h-1.5 w-1.5 rounded-full ${storyboard ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                    {activeScene?.name || 'SYNCING...'}
+                    {activeScene?.description?.substring(0, 20).toUpperCase() || 'SYNCING...'}...
                   </span>
                   <span className="text-slate-400">{Math.round(scrollPercent)}%</span>
                 </div>
