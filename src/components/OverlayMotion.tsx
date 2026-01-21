@@ -20,9 +20,8 @@ export default function OverlayMotion({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
 
-  // Mapping MongoDB emotion strings to Emojis
   const emotionEmojis: Record<string, string[]> = {
-    fear: ['😨', '🌑', '👻'], // Added 'fear' to match your Mongo schema
+    fear: ['😨', '🌑', '👻'], // Added to match your Mongo "fear" label
     calm: ['🌊', '🍃', '☁️'],
     tense: ['⚡', '🔥', '💥'],
     exciting: ['✨', '🚀', '🎉'],
@@ -41,6 +40,7 @@ export default function OverlayMotion({
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      console.log("Canvas Engine: Resized to", canvas.width, "x", canvas.height);
     };
 
     window.addEventListener('resize', resize);
@@ -51,47 +51,57 @@ export default function OverlayMotion({
     const animate = (time: number) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // DATA SAFETY CHECK
-      if (isActive && scene) {
-        // 1. EXTRACT NESTED DATA FROM MONGO SCHEMA
-        // We check scene.emotion_curve.primary first, then fallback to props
-        const activeEmotion = scene.emotion_curve?.primary || emotion || 'neutral';
-        const activeIntensity = scene.emotion_curve?.intensity || intensity || 0.5;
-        const hints = scene.layout_hints && scene.layout_hints.length > 0 
-          ? scene.layout_hints 
-          : [{ x: 0.5, y: 0.5 }]; // Center fallback
+      // --- DEBUG BOX ---
+      // If you see a small purple box in the top left, the canvas IS working.
+      // If you DON'T see this, the canvas is hidden behind another layer.
+      ctx.fillStyle = 'rgba(128, 0, 128, 0.5)';
+      ctx.fillRect(10, 10, 20, 20);
 
+      // Check for isActive and the existence of scene
+      if (isActive) {
         const elapsed = time - startTime;
-        const duration = scene.duration || 4000;
-        const progress = (elapsed % duration) / duration; 
+        
+        // 1. DATA DRILLING (Patching for your MongoDB Schema)
+        const currentEmotion = scene?.emotion_curve?.primary || emotion || 'neutral';
+        const currentIntensity = scene?.emotion_curve?.intensity || intensity || 0.5;
+        const duration = scene?.duration || 4000;
+        
+        // 2. PATH FALLBACK (If hints are missing, glide diagonal)
+        const hints = (scene?.layout_hints && scene.layout_hints.length > 0)
+          ? scene.layout_hints 
+          : [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }];
 
-        // 2. PATHFINDING
+        const progress = (elapsed % duration) / duration;
         const pos = pathFinder.getPointOnPath(hints, progress);
+        
         const x = pos.x * canvas.width;
         const y = pos.y * canvas.height;
 
-        // 3. SELECT EMOJI
-        const emojis = emotionEmojis[activeEmotion] || emotionEmojis.neutral;
+        // 3. SELECTION
+        const emojis = emotionEmojis[currentEmotion] || emotionEmojis.neutral;
         const actor = emojis[0];
 
-        // 4. RENDERING
+        // 4. RENDER
         ctx.save();
         
-        // Motion FX based on intensity
-        const pulse = motionType === 'pulse' ? Math.sin(time / 300) * 10 : 0;
-        const size = 50 + (activeIntensity * 20) + pulse;
-
-        ctx.font = `${size}px serif`;
+        // Scale based on intensity
+        const baseSize = 50;
+        const pulse = Math.sin(time / 400) * 5;
+        ctx.font = `${baseSize + (currentIntensity * 30) + pulse}px serif`;
+        
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
-        // Glow Effect
-        ctx.shadowBlur = 20 * activeIntensity;
-        ctx.shadowColor = 'white';
+        // Glow/Shadow for visibility over text
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = 'rgba(255, 255, 255, 1)';
         
-        // Final Draw
+        // If position is valid, draw
         if (!isNaN(x) && !isNaN(y)) {
           ctx.fillText(actor, x, y);
+        } else {
+          // Fallback Draw at center if Math fails
+          ctx.fillText(actor, canvas.width / 2, canvas.height / 2);
         }
         
         ctx.restore();
@@ -106,7 +116,7 @@ export default function OverlayMotion({
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [isActive, scene, emotion, motionType, intensity]);
+  }, [isActive, scene, emotion, intensity]);
 
   return (
     <canvas
@@ -114,11 +124,11 @@ export default function OverlayMotion({
       id="narrative-canvas-layer"
       className="fixed inset-0 pointer-events-none"
       style={{ 
-        zIndex: 99999, 
-        display: isActive ? 'block' : 'none',
+        zIndex: 9999, // Lowered slightly from 99999 to ensure HUD stays on top
+        display: 'block', // Always block for debugging
         background: 'transparent',
-        // Contrast enhancement to see over article text
-        filter: 'drop-shadow(0px 0px 10px rgba(255,255,255,0.8))'
+        opacity: isActive ? 1 : 0, // Control visibility via opacity
+        transition: 'opacity 0.5s ease'
       }}
     />
   );
