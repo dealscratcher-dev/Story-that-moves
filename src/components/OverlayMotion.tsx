@@ -16,6 +16,7 @@ interface Particle {
   size: number;
   opacity: number;
   phase: number;
+  emoji: string; // Added emoji property
 }
 
 interface OverlayMotionProps {
@@ -37,14 +38,25 @@ export default function OverlayMotion({
   const animationRef = useRef<number>();
   const particlesRef = useRef<Particle[]>([]);
   
+  // Emoji Mapping based on Emotion
+  const emotionEmojis: Record<string, string[]> = {
+    calm: ['🌊', '🍃', '☁️'],
+    tense: ['⚡', '🔥', '💥'],
+    exciting: ['✨', '🚀', '🎉'],
+    sad: ['💧', '🌧️', '🌑'],
+    joyful: ['☀️', '🌸', '🎈'],
+    mysterious: ['🔮', '🌌', '👁️'],
+    neutral: ['⚪', '🌫️', '💠']
+  };
+
   const toneMap: Record<string, string> = {
-    calm: '100, 116, 139',      // Slate 500
-    tense: '20, 20, 20',       // Near black for tension
-    exciting: '234, 179, 8',   // Yellow 500
-    sad: '71, 85, 105',        // Slate 600
-    joyful: '59, 130, 246',    // Blue 500
-    mysterious: '139, 92, 246', // Violet 500
-    neutral: '148, 163, 184'   // Slate 400
+    calm: '100, 116, 139',      
+    tense: '20, 20, 20',       
+    exciting: '234, 179, 8',   
+    sad: '71, 85, 105',        
+    joyful: '59, 130, 246',    
+    mysterious: '139, 92, 246', 
+    neutral: '148, 163, 184'   
   };
 
   useEffect(() => {
@@ -60,12 +72,14 @@ export default function OverlayMotion({
       
       const w = canvas.width;
       const h = canvas.height;
-      const count = Math.floor(50 * intensity);
+      const count = Math.floor(40 * intensity); // Slightly fewer for text performance
       
       const zones: SafeZone[] = [
         { x: 0, y: 0, width: w * 0.15, height: h },
         { x: w * 0.85, y: 0, width: w * 0.15, height: h },
       ];
+
+      const currentEmojis = emotionEmojis[emotion] || emotionEmojis.neutral;
 
       particlesRef.current = Array.from({ length: count }, () => {
         const zone = zones[Math.floor(Math.random() * zones.length)];
@@ -74,9 +88,10 @@ export default function OverlayMotion({
           y: Math.random() * h,
           vx: (Math.random() - 0.5) * intensity * 1.5,
           vy: (Math.random() - 0.5) * intensity * 1.5,
-          size: Math.random() * 3 + 1, // Larger particles for visibility
-          opacity: Math.random() * 0.4 + 0.2,
-          phase: Math.random() * Math.PI * 2
+          size: Math.random() * 10 + 10, // Font size for emojis
+          opacity: Math.random() * 0.3 + 0.1,
+          phase: Math.random() * Math.PI * 2,
+          emoji: currentEmojis[Math.floor(Math.random() * currentEmojis.currentEmojis.length)]
         };
       });
     };
@@ -98,7 +113,7 @@ export default function OverlayMotion({
       
       const rgb = toneMap[emotion] || '148, 163, 184';
 
-      // 1. HUD RENDER
+      // 1. HUD RENDER (Status info)
       if (scene && scene.type) {
         ctx.save();
         const hudX = canvas.width * 0.89;
@@ -113,9 +128,11 @@ export default function OverlayMotion({
         ctx.restore();
       }
 
-      // 2. PARTICLE ENGINE
-      particlesRef.current.forEach((p, i) => {
+      // 2. EMOJI ENGINE (Replaces Particle Engine)
+      particlesRef.current.forEach((p) => {
         ctx.save();
+        
+        // Handle Motion Logic
         if (motionType === 'breathe') {
           const b = Math.sin(time * 0.8 + p.phase) * intensity;
           ctx.globalAlpha = p.opacity * (1 + b * 0.4);
@@ -129,10 +146,13 @@ export default function OverlayMotion({
           if (p.y < 0) p.y = canvas.height;
         }
 
-        ctx.fillStyle = `rgba(${rgb}, ${p.opacity})`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
+        // --- DRAW EMOJI INSTEAD OF CIRCLE ---
+        ctx.font = `${p.size}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = ctx.globalAlpha * p.opacity; // Compound opacity
+        ctx.fillText(p.emoji, p.x, p.y);
+        
         ctx.restore();
       });
 
@@ -151,7 +171,6 @@ export default function OverlayMotion({
 
   return (
     <>
-      {/* 🚀 ENGINE SIGNAL TAG: Top-right status indicator */}
       <div className="fixed top-6 right-6 z-[60] flex items-center gap-3 pointer-events-none select-none">
         <div className="flex flex-col items-end">
           <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md px-3 py-1 rounded-full border border-slate-200 shadow-sm">
@@ -173,9 +192,9 @@ export default function OverlayMotion({
         ref={canvasRef}
         className="fixed inset-0 pointer-events-none z-50 transition-opacity duration-1000"
         style={{ 
-          mixBlendMode: 'multiply', 
+          mixBlendMode: 'normal', // Changed from multiply to keep emoji colors clear
           opacity: 0.8,
-          background: 'linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.05) 100%)',
+          background: 'transparent',
           backdropFilter: 'contrast(1.01) brightness(1.01)'
         }}
       />
