@@ -57,7 +57,6 @@ const localMemoryBank = {
 
     const now = Date.now();
     if (now - lastPersistenceTime > 2000) {
-      // Database logic would go here, throttled to 2 seconds
       lastPersistenceTime = now;
     }
   },
@@ -97,7 +96,7 @@ export function CanvasRenderer({
       const easeFn = Easing[easeKey] || Easing.linear;
       const easedProgress = easeFn(progress);
 
-      // Clean Stage with Style DNA background
+      // Clean Stage Background
       ctx.globalAlpha = 0.15;
       ctx.fillStyle = currentFrame.style_dna?.colors?.background || '#020617';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -138,16 +137,16 @@ export function CanvasRenderer({
     };
   }, [currentFrameIndex, frames, onFrameComplete]);
 
-  // --- HELPERS (PARTICLE LOGIC REMOVED) ---
+  // --- HELPERS ---
 
   const drawTrail = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], color: string) => {
     if (points.length < 2) return;
     ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
-    ctx.setLineDash([2, 8]); 
+    ctx.setLineDash([4, 12]); 
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.2; // Very subtle history trail
+    ctx.globalAlpha = 0.3;
     points.forEach((p, i) => {
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
@@ -158,46 +157,40 @@ export function CanvasRenderer({
 
   const drawVisualEntity = (ctx: CanvasRenderingContext2D, label: string, action: string, x: number, y: number, frame: NarrativeFrame) => {
     const moodIntensity = frame.emotion_curve?.intensity || 0.5;
-
-    // --- PURE EMOJI MAPPING (NO PARTICLES) ---
-    const actionEmojiMap: Record<string, string> = {
-      write: '✍️',
-      revise: '📝',
-      anger: '💢',
-      severe: '⚠️',
-      think: '🧠',
-      talk: '💬',
-      joy: '✨',
-      pulse: '🌀',
-      default: '💠' // Standard "Stitch" Diamond
-    };
-
-    const emoji = actionEmojiMap[action] || actionEmojiMap.default;
-
+    const color = frame.style_dna?.colors?.accent || '#3b82f6';
+    
     ctx.save();
     
-    // Aesthetic Glow based on intensity
-    ctx.shadowBlur = 20 * moodIntensity;
-    ctx.shadowColor = frame.style_dna?.colors?.accent || '#ffffff';
+    // Aesthetic Glow
+    ctx.shadowBlur = 30 * moodIntensity;
+    ctx.shadowColor = color;
+    ctx.fillStyle = color;
 
-    // Pulse animation for specific actions
-    const pulse = (action === 'write' || action === 'revise' || moodIntensity > 0.8) 
-      ? 1 + Math.sin(Date.now() / 200) * 0.12 
-      : 1;
+    // Pulse calculation
+    const pulse = 1 + Math.sin(Date.now() / 250) * (0.1 * moodIntensity);
+    const size = 30 * pulse;
 
-    // Render Emoji as the primary actor
-    ctx.font = `${48 * pulse}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(emoji, x, y);
+    // --- GEOMETRIC RENDERING ---
+    if (action === 'write' || action === 'revise') {
+      // Angular "Working" State
+      ctx.translate(x, y);
+      ctx.rotate(Date.now() * 0.002);
+      ctx.fillRect(-size/2, -size/2, size, size);
+    } else {
+      // Circular "Being" State
+      ctx.beginPath();
+      ctx.arc(x, y, size * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Dynamic Labeling
+    ctx.restore();
+    ctx.save();
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px "Inter", sans-serif';
-    ctx.globalAlpha = 0.8;
-    ctx.shadowBlur = 0; 
+    ctx.font = 'bold 14px "Inter", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.9;
     ctx.fillText(label.toUpperCase(), x, y + 55);
-    
     ctx.restore();
   };
 
