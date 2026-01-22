@@ -24,7 +24,9 @@ export const pathFinder = {
    */
   snapToStage(x: number, y: number, canvasWidth: number, canvasHeight: number): Point {
     if (this.stageGrid.length === 0) {
-      return { x: x / canvasWidth, y: y / canvasHeight };
+      // Fallback to center if no grid available
+      console.warn('No stage grid available, falling back to center');
+      return { x: 0.5, y: 0.5 };
     }
 
     // Convert normalized coordinates to canvas coordinates
@@ -48,8 +50,8 @@ export const pathFinder = {
 
     // Return as normalized coordinates
     return {
-      x: closestPoint.x / canvasWidth,
-      y: closestPoint.y / canvasHeight
+      x: Math.max(0, Math.min(1, closestPoint.x / canvasWidth)),
+      y: Math.max(0, Math.min(1, closestPoint.y / canvasHeight))
     };
   },
 
