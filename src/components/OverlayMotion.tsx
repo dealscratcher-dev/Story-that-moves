@@ -79,6 +79,7 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
     
     // Share the grid with pathFinder so it can snap paths to white space
     pathFinder.setStageGrid(points);
+    console.log('Stage grid shared with pathFinder:', points.length, 'points');
   };
 
   useEffect(() => {
@@ -124,15 +125,15 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
         // --- 2. THE PATHS ---
         const hints = scene.layout_hints?.length ? scene.layout_hints : [{ x: 0.5, y: 0.5 }];
         
-        // Generate the white-space-constrained path
-        const pathPoints = pathFinder.generatePathPoints(hints, 100, canvas.width, canvas.height);
+        // Generate the white-space-constrained path with high resolution
+        const pathPoints = pathFinder.generatePathPoints(hints, 150, canvas.width, canvas.height);
         
         if (pathPoints.length > 1) {
           ctx.save();
           ctx.beginPath();
-          ctx.setLineDash([8, 12]);
-          ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)'; // Blue to see it better
-          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 8]);
+          ctx.strokeStyle = 'rgba(0, 0, 255, 0.5)'; // More visible blue
+          ctx.lineWidth = 3;
           pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
