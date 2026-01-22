@@ -13,7 +13,6 @@ export const pathFinder = {
 
   /**
    * Update the internal stage grid reference
-   * Call this from OverlayMotion whenever the grid is recalculated
    */
   setStageGrid(grid: Point[]) {
     this.stageGrid = grid;
@@ -24,68 +23,50 @@ export const pathFinder = {
    */
   snapToStage(x: number, y: number, canvasWidth: number, canvasHeight: number): Point {
     if (this.stageGrid.length === 0) {
-      // Fallback to center if no grid available
-      console.warn('No stage grid available, falling back to center');
-      return { x: 0.5, y: 0.5 };
+      return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
     }
 
-    // Convert normalized coordinates to canvas coordinates
+    // Convert normalized coordinates (0-1) to canvas pixel coordinates
     const targetX = x * canvasWidth;
     const targetY = y * canvasHeight;
 
-    // Find closest stage point
     let closestPoint = this.stageGrid[0];
-    let minDistance = Infinity;
+    let minDistanceSq = Infinity;
 
-    for (const point of this.stageGrid) {
+    // Use squared distance for performance (avoids Math.sqrt in loop)
+    for (let i = 0; i < this.stageGrid.length; i++) {
+      const point = this.stageGrid[i];
       const dx = point.x - targetX;
       const dy = point.y - targetY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
+      const distSq = dx * dx + dy * dy;
 
-      if (distance < minDistance) {
-        minDistance = distance;
+      if (distSq < minDistanceSq) {
+        minDistanceSq = distSq;
         closestPoint = point;
       }
     }
 
-    // Return as normalized coordinates
     return {
-      x: Math.max(0, Math.min(1, closestPoint.x / canvasWidth)),
-      y: Math.max(0, Math.min(1, closestPoint.y / canvasHeight))
+      x: closestPoint.x / canvasWidth,
+      y: closestPoint.y / canvasHeight
     };
   },
 
   /**
-   * Calculates a point AND the heading (angle) on a Catmull-Rom spline.
-   * NOW SNAPS TO STAGE GRID to avoid text areas.
+   * Core Catmull-Rom Spline Math (Pure - No Snapping here)
    */
-  getPointOnPath(points: Point[], t: number, canvasWidth?: number, canvasHeight?: number): PathState {
-    if (!points || !Array.isArray(points) || points.length === 0) {
-      return { x: 0.5, y: 0.5, angle: 0 };
-    }
-    
-    const validPoints = points.filter(p => p && typeof p.x === 'number' && typeof p.y === 'number');
-    
-    if (validPoints.length === 0) return { x: 0.5, y: 0.5, angle: 0 };
-    if (validPoints.length === 1) {
-      const snapped = canvasWidth && canvasHeight 
-        ? this.snapToStage(validPoints[0].x, validPoints[0].y, canvasWidth, canvasHeight)
-        : validPoints[0];
-      return { x: snapped.x, y: snapped.y, angle: 0 };
-    }
-
-    const clampedT = Math.max(0, Math.min(1, t));
-    const n = validPoints.length - 1;
-    const rawIndex = clampedT * n;
+  getSplinePoint(points: Point[], t: number): Point {
+    const n = points.length - 1;
+    const rawIndex = t * n;
     const i = Math.min(Math.floor(rawIndex), n - 1);
     const localT = rawIndex - i;
 
-    const p0 = validPoints[Math.max(i - 1, 0)];
-    const p1 = validPoints[i];
-    const p2 = validPoints[i + 1];
-    const p3 = validPoints[Math.min(i + 2, n)];
+    const p0 = points[Math.max(i - 1, 0)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(i + 2, n)];
 
-    const calculateCoord = (c0: number, c1: number, c2: number, c3: number, T: number) => {
+    const calc = (c0: number, c1: number, c2: number, c3: number, T: number) => {
       return 0.5 * (
         (2 * c1) +
         (-c0 + c2) * T +
@@ -94,85 +75,49 @@ export const pathFinder = {
       );
     };
 
-    // Calculate raw position
-    let x = calculateCoord(p0.x, p1.x, p2.x, p3.x, localT);
-    let y = calculateCoord(p0.y, p1.y, p2.y, p3.y, localT);
-
-    // Snap to stage grid if canvas dimensions are provided
-    if (canvasWidth && canvasHeight && this.stageGrid.length > 0) {
-      const snapped = this.snapToStage(x, y, canvasWidth, canvasHeight);
-      x = snapped.x;
-      y = snapped.y;
-    }
-
-    // Calculate direction
-    const lookAheadT = localT + 0.01;
-    const aheadX = calculateCoord(p0.x, p1.x, p2.x, p3.x, lookAheadT);
-    const aheadY = calculateCoord(p0.y, p1.y, p2.y, p3.y, lookAheadT);
-    
-    let angle = Math.atan2(aheadY - y, aheadX - x);
-
     return {
-      x: Math.max(0, Math.min(1, isNaN(x) ? 0.5 : x)),
-      y: Math.max(0, Math.min(1, isNaN(y) ? 0.5 : y)),
-      angle: isNaN(angle) ? 0 : angle
+      x: calc(p0.x, p1.x, p2.x, p3.x, localT),
+      y: calc(p0.y, p1.y, p2.y, p3.y, localT)
     };
   },
 
   /**
-   * Proximity Check: Tells the engine if two entities have "met" 
+   * Generate path points that are pre-snapped to the white space grid.
+   * This is the "Blueprint" that the dots and entities both follow.
+   */
+  generatePathPoints(hints: Point[], resolution: number = 100, canvasWidth?: number, canvasHeight?: number): Point[] {
+    if (!hints || hints.length === 0) return [];
+    
+    const path: Point[] = [];
+    const steps = resolution * 2; // Higher detail for better grid matching
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const splinePos = this.getSplinePoint(hints, t);
+      
+      if (canvasWidth && canvasHeight && this.stageGrid.length > 0) {
+        // Snap the raw spline coordinate to the nearest "Red Dot" location
+        const snapped = this.snapToStage(splinePos.x, splinePos.y, canvasWidth, canvasHeight);
+        path.push(snapped);
+      } else {
+        path.push(splinePos);
+      }
+    }
+
+    // Clean the path: Remove points that snapped to the same grid coordinate
+    return path.filter((p, i) => {
+      if (i === 0) return true;
+      const prev = path[i - 1];
+      return Math.abs(p.x - prev.x) > 0.0001 || Math.abs(p.y - prev.y) > 0.0001;
+    });
+  },
+
+  /**
+   * Proximity Check for interactions
    */
   checkCollision(p1: Point, p2: Point, threshold: number = 0.05): boolean {
     const dx = p1.x - p2.x;
     const dy = p1.y - p2.y;
     return Math.sqrt(dx * dx + dy * dy) < threshold;
-  },
-
-  /**
-   * Generate path points that follow the stage grid (avoiding text)
-   * This ensures EVERY SINGLE POINT on the path stays in white space
-   */
-  generatePathPoints(hints: Point[], resolution: number = 100, canvasWidth?: number, canvasHeight?: number): Point[] {
-    if (!hints || hints.length === 0) return [];
-    if (!canvasWidth || !canvasHeight || this.stageGrid.length === 0) {
-      // Fallback: generate normal path if no grid available
-      const path: Point[] = [];
-      for (let i = 0; i <= resolution; i++) {
-        const state = this.getPointOnPath(hints, i / resolution);
-        path.push({ x: state.x, y: state.y });
-      }
-      return path;
-    }
-    
-    const path: Point[] = [];
-    
-    // Generate MORE points for smoother snapping
-    const highResolution = resolution * 3;
-    
-    for (let i = 0; i <= highResolution; i++) {
-      // Get raw spline position
-      const t = i / highResolution;
-      const rawState = this.getPointOnPath(hints, t);
-      
-      // Snap EVERY point to the nearest white space
-      const snapped = this.snapToStage(rawState.x, rawState.y, canvasWidth, canvasHeight);
-      path.push(snapped);
-    }
-    
-    // Remove duplicate consecutive points (caused by snapping multiple points to same grid point)
-    const dedupedPath: Point[] = [path[0]];
-    for (let i = 1; i < path.length; i++) {
-      const prev = dedupedPath[dedupedPath.length - 1];
-      const curr = path[i];
-      const dx = Math.abs(curr.x - prev.x);
-      const dy = Math.abs(curr.y - prev.y);
-      
-      // Only add if it's a different position (threshold of 0.001 in normalized coords)
-      if (dx > 0.001 || dy > 0.001) {
-        dedupedPath.push(curr);
-      }
-    }
-    
-    return dedupedPath;
   }
 };
