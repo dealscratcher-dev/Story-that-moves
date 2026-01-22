@@ -130,26 +130,49 @@ export const pathFinder = {
 
   /**
    * Generate path points that follow the stage grid (avoiding text)
-   * This ensures the ENTIRE path stays in white space
+   * This ensures EVERY SINGLE POINT on the path stays in white space
    */
   generatePathPoints(hints: Point[], resolution: number = 100, canvasWidth?: number, canvasHeight?: number): Point[] {
     if (!hints || hints.length === 0) return [];
-    const path: Point[] = [];
-    
-    // First, snap all hint points to white space
-    const snappedHints = hints.map(hint => {
-      if (canvasWidth && canvasHeight && this.stageGrid.length > 0) {
-        return this.snapToStage(hint.x, hint.y, canvasWidth, canvasHeight);
+    if (!canvasWidth || !canvasHeight || this.stageGrid.length === 0) {
+      // Fallback: generate normal path if no grid available
+      const path: Point[] = [];
+      for (let i = 0; i <= resolution; i++) {
+        const state = this.getPointOnPath(hints, i / resolution);
+        path.push({ x: state.x, y: state.y });
       }
-      return hint;
-    });
-    
-    // Then generate path using the snapped hints
-    for (let i = 0; i <= resolution; i++) {
-      const state = this.getPointOnPath(snappedHints, i / resolution, canvasWidth, canvasHeight);
-      path.push({ x: state.x, y: state.y });
+      return path;
     }
     
-    return path;
+    const path: Point[] = [];
+    
+    // Generate MORE points for smoother snapping
+    const highResolution = resolution * 3;
+    
+    for (let i = 0; i <= highResolution; i++) {
+      // Get raw spline position
+      const t = i / highResolution;
+      const rawState = this.getPointOnPath(hints, t);
+      
+      // Snap EVERY point to the nearest white space
+      const snapped = this.snapToStage(rawState.x, rawState.y, canvasWidth, canvasHeight);
+      path.push(snapped);
+    }
+    
+    // Remove duplicate consecutive points (caused by snapping multiple points to same grid point)
+    const dedupedPath: Point[] = [path[0]];
+    for (let i = 1; i < path.length; i++) {
+      const prev = dedupedPath[dedupedPath.length - 1];
+      const curr = path[i];
+      const dx = Math.abs(curr.x - prev.x);
+      const dy = Math.abs(curr.y - prev.y);
+      
+      // Only add if it's a different position (threshold of 0.001 in normalized coords)
+      if (dx > 0.001 || dy > 0.001) {
+        dedupedPath.push(curr);
+      }
+    }
+    
+    return dedupedPath;
   }
 };
