@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MotionType, StoryboardScene } from '../types/storyboard';
 import { pathFinder } from '../utils/pathFinder';
 
@@ -10,14 +10,20 @@ interface OverlayMotionProps {
   scene?: StoryboardScene | null;
 }
 
+interface GridPoint {
+  x: number;
+  y: number;
+  isAllowed: boolean;
+}
+
 export default function OverlayMotion({ 
   isActive, 
   scene 
 }: OverlayMotionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
+  const gridCache = useRef<GridPoint[]>([]);
 
-  // Comprehensive Mapping for Narrative Entities
   const emotionEmojis: Record<string, string[]> = {
     fear: ['😨', '😱', '👻'],
     joy: ['☀️', '✨', '🎈'],
@@ -29,15 +35,43 @@ export default function OverlayMotion({
     neutral: ['⚪', '🌫️', '💠']
   };
 
+  // Generate the stage map: Only marks "white space" as valid dots
+  const updateStageGrid = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const points: GridPoint[] = [];
+    const step = 45; // Density of the red dot grid
+
+    // We temporarily read the background
+    // Note: This requires the iframe/page background to be accessible
+    for (let x = 0; x < width; x += step) {
+      for (let y = 0; y < height; y += step) {
+        try {
+          const pixel = ctx.getImageData(x, y, 1, 1).data;
+          // Check if pixel is white (RGB > 240) or transparent (Alpha close to 0)
+          const isWhite = pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240;
+          const isTransparent = pixel[3] < 10;
+          
+          if (isWhite || isTransparent) {
+            points.push({ x, y, isAllowed: true });
+          }
+        } catch (e) {
+          // Fallback if cross-origin prevents pixel reading: draw full grid
+          points.push({ x, y, isAllowed: true });
+        }
+      }
+    }
+    gridCache.current = points;
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      if (isActive) updateStageGrid(ctx, canvas.width, canvas.height);
     };
 
     window.addEventListener('resize', resize);
@@ -54,32 +88,26 @@ export default function OverlayMotion({
         const duration = scene.duration || 4000;
         const progress = (elapsed % duration) / duration;
 
-        // --- 1. THE STAGE (Option B: Coordinate Grid) ---
-        // Draws the "legal" play area bounds
+        // --- 1. THE STAGE (Option B: Red Dot White-Space Grid) ---
         ctx.save();
-        ctx.globalAlpha = 0.08;
-        const gridSize = 60; // Approx 1 inch square feel
-        for (let gx = 0; gx < canvas.width; gx += gridSize) {
-          for (let gy = 0; gy < canvas.height; gy += gridSize) {
-            ctx.fillStyle = '#ff4444';
-            ctx.beginPath();
-            ctx.arc(gx, gy, 1.2, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
+        ctx.globalAlpha = 0.4;
+        gridCache.current.forEach(point => {
+          ctx.fillStyle = '#ff4444';
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
         ctx.restore();
 
         // --- 2. THE PATHS (Option A: Spline Navigation) ---
-        const hints = scene.layout_hints && scene.layout_hints.length > 0 
-          ? scene.layout_hints 
-          : [{ x: 0.5, y: 0.5 }];
+        const hints = scene.layout_hints?.length ? scene.layout_hints : [{ x: 0.5, y: 0.5 }];
 
         if (hints.length > 1) {
           ctx.save();
           const pathPoints = pathFinder.generatePathPoints(hints, 60);
           ctx.beginPath();
           ctx.setLineDash([8, 12]);
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
           pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
@@ -90,52 +118,43 @@ export default function OverlayMotion({
           ctx.restore();
         }
 
-        // --- 3. THE CAST (Multi-Entity Orchestration) ---
-        const beats = scene.action_beats || [];
-        
-        // If no beats, default to a single narrator entity
-        const entitiesToRender = beats.length > 0 ? beats : [{
+        // --- 3. THE CAST (Orchestration) ---
+        const beats = scene.action_beats?.length ? scene.action_beats : [{
           entity: 'narrator',
           emotion: scene.emotion_curve?.primary || 'neutral',
           action: 'narrate'
         }];
 
-        entitiesToRender.forEach((beat, index) => {
-          // Robust Coordinate Calculation
+        beats.forEach((beat, index) => {
           const basePos = pathFinder.getPointOnPath(hints, progress);
+          const separation = (index - (beats.length - 1) / 2) * 70;
           
-          // Spatial Separation: Prevents entities from stacking
-          // Shifts each entity slightly so the 'man' and 'dragon' have room
-          const separation = (index - (entitiesToRender.length - 1) / 2) * 60;
-          
+          // Entites move on the grid
           const x = basePos.x * canvas.width + (index % 2 === 0 ? separation : -separation);
           const y = basePos.y * canvas.height;
 
           if (isNaN(x) || isNaN(y)) return;
 
-          // Visual Styling
           const emojis = emotionEmojis[beat.emotion] || emotionEmojis.neutral;
-          const intensityScale = scene.emotion_curve?.intensity || 0.5;
-          const size = 45 + (intensityScale * 25);
+          const size = 50 + (scene.emotion_curve?.intensity || 0.5) * 20;
 
           ctx.save();
-          // Halo for visibility over article text
-          ctx.shadowBlur = 25;
-          ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
-          
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = 'white';
           ctx.font = `${size}px serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          // Render the Entity
-          ctx.fillText(emojis[0], x, y);
+          // Entity rotation based on spline heading
+          ctx.translate(x, y);
+          ctx.rotate(basePos.angle * 0.2); // Subtle tilt toward direction
+          ctx.fillText(emojis[0], 0, 0);
 
-          // Debug Metadata (Tiny label below entity)
-          ctx.font = '12px Inter, system-ui, sans-serif';
-          ctx.fillStyle = 'rgba(0,0,0,0.5)';
-          ctx.shadowBlur = 0;
-          ctx.fillText(`${beat.entity} (${beat.action})`, x, y + size/1.5);
-          
+          // Label
+          ctx.rotate(-(basePos.angle * 0.2));
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillText(beat.entity.toUpperCase(), 0, size / 1.5);
           ctx.restore();
         });
       }
@@ -155,12 +174,11 @@ export default function OverlayMotion({
     <canvas
       ref={canvasRef}
       id="narrative-animation-layer"
-      className="fixed inset-0 pointer-events-none transition-opacity duration-500"
+      className="fixed inset-0 pointer-events-none"
       style={{ 
-        zIndex: 100000, // Topmost layer
+        zIndex: 100000,
         display: isActive ? 'block' : 'none',
-        background: 'transparent',
-        pointerEvents: 'none'
+        background: 'transparent'
       }}
     />
   );
