@@ -76,6 +76,9 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
     
     console.log(`Grid updated: ${points.length} white space points found out of ${(width/step) * (height/step)} total`);
     gridCache.current = points;
+    
+    // Share the grid with pathFinder so it can snap paths to white space
+    pathFinder.setStageGrid(points);
   };
 
   useEffect(() => {
@@ -122,7 +125,7 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
         const hints = scene.layout_hints?.length ? scene.layout_hints : [{ x: 0.5, y: 0.5 }];
         if (hints.length > 1) {
           ctx.save();
-          const pathPoints = pathFinder.generatePathPoints(hints, 60);
+          const pathPoints = pathFinder.generatePathPoints(hints, 60, canvas.width, canvas.height);
           ctx.beginPath();
           ctx.setLineDash([8, 12]);
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
@@ -144,11 +147,31 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
         }];
 
         entities.forEach((beat, index) => {
-          const pathData = pathFinder.getPointOnPath(hints, progress);
+          const pathData = pathFinder.getPointOnPath(hints, progress, canvas.width, canvas.height);
           const separation = (index - (entities.length - 1) / 2) * 70;
           
-          const x = pathData.x * canvas.width + (index % 2 === 0 ? separation : -separation);
-          const y = pathData.y * canvas.height;
+          // Calculate raw position with separation
+          let rawX = pathData.x * canvas.width + (index % 2 === 0 ? separation : -separation);
+          let rawY = pathData.y * canvas.height;
+          
+          // CRITICAL: Snap the final position (including separation) back to white space
+          const finalSnapped = pathFinder.snapToStage(
+            rawX / canvas.width, 
+            rawY / canvas.height, 
+            canvas.width, 
+            canvas.height
+          );
+          
+          const x = finalSnapped.x * canvas.width;
+          const y = finalSnapped.y * canvas.height;
+
+          // DEBUG: Draw a small circle at the snapped position to verify it's in white space
+          ctx.save();
+          ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+          ctx.beginPath();
+          ctx.arc(x, y, 15, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
 
           const emojis = emotionEmojis[beat.emotion] || emotionEmojis.neutral;
           const size = 45 + (scene.emotion_curve?.intensity || 0.5) * 20;
