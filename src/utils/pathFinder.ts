@@ -130,13 +130,23 @@ export const pathFinder = {
 
   /**
    * Generate path points that follow the stage grid (avoiding text)
+   * This ensures the ENTIRE path stays in white space
    */
   generatePathPoints(hints: Point[], resolution: number = 100, canvasWidth?: number, canvasHeight?: number): Point[] {
     if (!hints || hints.length === 0) return [];
     const path: Point[] = [];
     
+    // First, snap all hint points to white space
+    const snappedHints = hints.map(hint => {
+      if (canvasWidth && canvasHeight && this.stageGrid.length > 0) {
+        return this.snapToStage(hint.x, hint.y, canvasWidth, canvasHeight);
+      }
+      return hint;
+    });
+    
+    // Then generate path using the snapped hints
     for (let i = 0; i <= resolution; i++) {
-      const state = this.getPointOnPath(hints, i / resolution, canvasWidth, canvasHeight);
+      const state = this.getPointOnPath(snappedHints, i / resolution, canvasWidth, canvasHeight);
       path.push({ x: state.x, y: state.y });
     }
     
