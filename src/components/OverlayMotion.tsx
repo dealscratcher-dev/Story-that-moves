@@ -123,12 +123,16 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
 
         // --- 2. THE PATHS ---
         const hints = scene.layout_hints?.length ? scene.layout_hints : [{ x: 0.5, y: 0.5 }];
-        if (hints.length > 1) {
+        
+        // Generate the white-space-constrained path
+        const pathPoints = pathFinder.generatePathPoints(hints, 100, canvas.width, canvas.height);
+        
+        if (pathPoints.length > 1) {
           ctx.save();
-          const pathPoints = pathFinder.generatePathPoints(hints, 60, canvas.width, canvas.height);
           ctx.beginPath();
           ctx.setLineDash([8, 12]);
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+          ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)'; // Blue to see it better
+          ctx.lineWidth = 2;
           pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
@@ -147,14 +151,26 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
         }];
 
         entities.forEach((beat, index) => {
-          const pathData = pathFinder.getPointOnPath(hints, progress, canvas.width, canvas.height);
+          // Get position along the pre-computed white-space path
+          if (pathPoints.length === 0) return;
+          
+          const pathIndex = Math.floor(progress * (pathPoints.length - 1));
+          const currentPoint = pathPoints[pathIndex];
+          
+          // Calculate angle from path direction
+          const nextIndex = Math.min(pathIndex + 1, pathPoints.length - 1);
+          const nextPoint = pathPoints[nextIndex];
+          const angle = Math.atan2(
+            (nextPoint.y - currentPoint.y) * canvas.height,
+            (nextPoint.x - currentPoint.x) * canvas.width
+          );
+          
+          // Apply separation for multiple entities (but keep them on nearby white space)
           const separation = (index - (entities.length - 1) / 2) * 70;
+          let rawX = currentPoint.x * canvas.width + (index % 2 === 0 ? separation : -separation);
+          let rawY = currentPoint.y * canvas.height;
           
-          // Calculate raw position with separation
-          let rawX = pathData.x * canvas.width + (index % 2 === 0 ? separation : -separation);
-          let rawY = pathData.y * canvas.height;
-          
-          // CRITICAL: Snap the final position (including separation) back to white space
+          // Snap final position to white space
           const finalSnapped = pathFinder.snapToStage(
             rawX / canvas.width, 
             rawY / canvas.height, 
@@ -183,10 +199,10 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.translate(x, y);
-          ctx.rotate(pathData.angle * 0.15);
+          ctx.rotate(angle * 0.15);
           ctx.fillText(emojis[0], 0, 0);
           
-          ctx.rotate(-(pathData.angle * 0.15));
+          ctx.rotate(-(angle * 0.15));
           ctx.font = 'bold 11px sans-serif';
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
           ctx.fillText(beat.entity.toUpperCase(), 0, size/1.5);
