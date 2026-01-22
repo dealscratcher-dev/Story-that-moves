@@ -3,33 +3,29 @@ import type { MotionType, StoryboardScene } from '../types/storyboard';
 import { pathFinder } from '../utils/pathFinder';
 
 interface OverlayMotionProps {
-  motionType: MotionType;
-  intensity: number;
-  emotion: string;
+  motionType?: MotionType;
+  intensity?: number;
+  emotion?: string;
   isActive: boolean;
   scene?: StoryboardScene | null;
 }
 
 export default function OverlayMotion({ 
-  motionType = 'drift', 
-  intensity = 0.5, 
-  emotion = 'neutral', 
   isActive, 
   scene 
 }: OverlayMotionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
 
-  // Updated Mapping: Added direct matches for MongoDB emotion keys
+  // Comprehensive Mapping for Narrative Entities
   const emotionEmojis: Record<string, string[]> = {
-    fear: ['😨', '😰', '😱'],      //
-    joy: ['☀️', '🌸', '🎈'],       // Added for MongoDB 'joy'
-    anger: ['😡', '🔥', '💢'],     // Added for MongoDB 'anger'
-    sadness: ['💧', '🌧️', '🌑'],   // Added for MongoDB 'sadness'
-    calm: ['🌊', '🍃', '☁️'],
-    tense: ['⚡', '🔥', '💥'],
-    exciting: ['✨', '🚀', '🎉'],
-    mysterious: ['🔮', '🌌', '👁️'],
+    fear: ['😨', '😱', '👻'],
+    joy: ['☀️', '✨', '🎈'],
+    anger: ['😡', '🔥', '💢'],
+    sadness: ['💧', '🌧️', '🌑'],
+    trust: ['🤝', '🛡️', '🙏'],
+    surprise: ['😲', '‼️', '⚡'],
+    anticipation: ['⏳', '🚀', '🔭'],
     neutral: ['⚪', '🌫️', '💠']
   };
 
@@ -50,71 +46,98 @@ export default function OverlayMotion({
     let startTime = performance.now();
 
     const animate = (time: number) => {
+      if (!ctx || !canvas) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (isActive && scene) {
-        // 1. Extract Data from Scene
-        const activeEmotion = scene.emotion_curve?.primary || 'neutral';
-        const activeIntensity = scene.emotion_curve?.intensity || 0.5;
-        const hints = scene.layout_hints && scene.layout_hints.length > 0 
-          ? scene.layout_hints 
-          : [{ x: 0.5, y: 0.5 }];
-          
         const elapsed = time - startTime;
         const duration = scene.duration || 4000;
         const progress = (elapsed % duration) / duration;
 
-        // 2. PATH VISUALIZATION (Debugging Layer)
+        // --- 1. THE STAGE (Option B: Coordinate Grid) ---
+        // Draws the "legal" play area bounds
+        ctx.save();
+        ctx.globalAlpha = 0.08;
+        const gridSize = 60; // Approx 1 inch square feel
+        for (let gx = 0; gx < canvas.width; gx += gridSize) {
+          for (let gy = 0; gy < canvas.height; gy += gridSize) {
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath();
+            ctx.arc(gx, gy, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+
+        // --- 2. THE PATHS (Option A: Spline Navigation) ---
+        const hints = scene.layout_hints && scene.layout_hints.length > 0 
+          ? scene.layout_hints 
+          : [{ x: 0.5, y: 0.5 }];
+
         if (hints.length > 1) {
           ctx.save();
-          // Draw the smooth spline path
-          const pathPoints = pathFinder.generatePathPoints(hints, 100);
+          const pathPoints = pathFinder.generatePathPoints(hints, 60);
           ctx.beginPath();
-          ctx.setLineDash([5, 8]); // Dashed line
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)'; // Faint gray
-          ctx.lineWidth = 1.5;
-
-          pathPoints.forEach((p, index) => {
+          ctx.setLineDash([8, 12]);
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+          pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
-            if (index === 0) ctx.moveTo(px, py);
+            if (i === 0) ctx.moveTo(px, py);
             else ctx.lineTo(px, py);
           });
           ctx.stroke();
-
-          // Draw "Heat Map" dots for actual layout_hints in DB
-          hints.forEach(hint => {
-            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // Transparent red
-            ctx.beginPath();
-            ctx.arc(hint.x * canvas.width, hint.y * canvas.height, 4, 0, Math.PI * 2);
-            ctx.fill();
-          });
           ctx.restore();
         }
 
-        // 3. CALCULATE CURRENT EMOJI POSITION
-        const pos = pathFinder.getPointOnPath(hints, progress);
-        const x = pos.x * canvas.width;
-        const y = pos.y * canvas.height;
-
-        // 4. DRAW EMOJI
-        const emojis = emotionEmojis[activeEmotion] || emotionEmojis.neutral;
-        ctx.save();
+        // --- 3. THE CAST (Multi-Entity Orchestration) ---
+        const beats = scene.action_beats || [];
         
-        // Dynamic sizing based on intensity
-        const size = 50 + (activeIntensity * 25);
-        ctx.font = `${size}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Add halo/glow for readability over dark text
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+        // If no beats, default to a single narrator entity
+        const entitiesToRender = beats.length > 0 ? beats : [{
+          entity: 'narrator',
+          emotion: scene.emotion_curve?.primary || 'neutral',
+          action: 'narrate'
+        }];
 
-        if (!isNaN(x) && !isNaN(y)) {
+        entitiesToRender.forEach((beat, index) => {
+          // Robust Coordinate Calculation
+          const basePos = pathFinder.getPointOnPath(hints, progress);
+          
+          // Spatial Separation: Prevents entities from stacking
+          // Shifts each entity slightly so the 'man' and 'dragon' have room
+          const separation = (index - (entitiesToRender.length - 1) / 2) * 60;
+          
+          const x = basePos.x * canvas.width + (index % 2 === 0 ? separation : -separation);
+          const y = basePos.y * canvas.height;
+
+          if (isNaN(x) || isNaN(y)) return;
+
+          // Visual Styling
+          const emojis = emotionEmojis[beat.emotion] || emotionEmojis.neutral;
+          const intensityScale = scene.emotion_curve?.intensity || 0.5;
+          const size = 45 + (intensityScale * 25);
+
+          ctx.save();
+          // Halo for visibility over article text
+          ctx.shadowBlur = 25;
+          ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+          
+          ctx.font = `${size}px serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          // Render the Entity
           ctx.fillText(emojis[0], x, y);
-        }
-        ctx.restore();
+
+          // Debug Metadata (Tiny label below entity)
+          ctx.font = '12px Inter, system-ui, sans-serif';
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 0;
+          ctx.fillText(`${beat.entity} (${beat.action})`, x, y + size/1.5);
+          
+          ctx.restore();
+        });
       }
 
       requestRef.current = requestAnimationFrame(animate);
@@ -126,19 +149,18 @@ export default function OverlayMotion({
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [isActive, scene, emotion]);
+  }, [isActive, scene]);
 
   return (
     <canvas
       ref={canvasRef}
-      id="narrative-canvas-layer"
-      className="fixed inset-0 pointer-events-none"
+      id="narrative-animation-layer"
+      className="fixed inset-0 pointer-events-none transition-opacity duration-500"
       style={{ 
-        zIndex: 99999, 
+        zIndex: 100000, // Topmost layer
         display: isActive ? 'block' : 'none',
         background: 'transparent',
-        // Enhances visibility of the animation layer over the iframe content
-        filter: 'drop-shadow(0px 0px 8px rgba(255,255,255,0.6))' 
+        pointerEvents: 'none'
       }}
     />
   );
