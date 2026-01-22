@@ -3,9 +3,6 @@ import type { MotionType, StoryboardScene } from '../types/storyboard';
 import { pathFinder } from '../utils/pathFinder';
 
 interface OverlayMotionProps {
-  motionType?: MotionType;
-  intensity?: number;
-  emotion?: string;
   isActive: boolean;
   scene?: StoryboardScene | null;
 }
@@ -15,10 +12,7 @@ interface GridPoint {
   y: number;
 }
 
-export default function OverlayMotion({ 
-  isActive, 
-  scene 
-}: OverlayMotionProps) {
+export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
   const gridCache = useRef<GridPoint[]>([]);
@@ -30,33 +24,32 @@ export default function OverlayMotion({
     sadness: ['💧', '🌧️', '🌑'],
     trust: ['🤝', '🛡️', '🙏'],
     surprise: ['😲', '‼️', '⚡'],
-    anticipation: ['⏳', '🚀', '🔭'],
     neutral: ['⚪', '🌫️', '💠']
   };
 
   /**
-   * PROBE LOGIC: Scans the underlying page to find white space.
-   * This ensures red dots don't cover text as seen in your conceptual goal.
+   * REVISED STAGE DETECTION: 
+   * Uses DOM geometry to find real white space, ignoring text-heavy areas.
    */
-  const updateStageGrid = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const updateStageGrid = (width: number, height: number) => {
     const points: GridPoint[] = [];
-    const step = 45; // Density of the stage grid
+    const step = 45;
+
+    // 1. Find all "Blocker" elements (text, images, nav)
+    // We target common tags used in Paul Graham's essays and news sites
+    const blockers = Array.from(document.querySelectorAll('p, img, h1, h2, table, font'));
+    const blockerRects = blockers.map(el => el.getBoundingClientRect());
 
     for (let x = 0; x < width; x += step) {
       for (let y = 0; y < height; y += step) {
-        try {
-          // Probe the background color at this coordinate
-          const pixel = ctx.getImageData(x, y, 1, 1).data;
-          
-          // Detect white space: RGB values above 245
-          const isWhite = pixel[0] > 245 && pixel[1] > 245 && pixel[2] > 245;
-          const isTransparent = pixel[3] < 10;
+        // 2. CHECK: Is this coordinate inside any text/image block?
+        const isBlocked = blockerRects.some(rect => 
+          x >= rect.left && x <= rect.right && 
+          y >= rect.top && y <= rect.bottom
+        );
 
-          if (isWhite || isTransparent) {
-            points.push({ x, y });
-          }
-        } catch (e) {
-          // Fallback if cross-origin restricts pixel access
+        // 3. ONLY ADD if the point is in the "Margins" or "Gaps"
+        if (!isBlocked) {
           points.push({ x, y });
         }
       }
@@ -67,18 +60,19 @@ export default function OverlayMotion({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
-    // willReadFrequently optimizes the getImageData calls
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      if (isActive) updateStageGrid(ctx, canvas.width, canvas.height);
+      updateStageGrid(canvas.width, canvas.height);
     };
 
     window.addEventListener('resize', resize);
+    // Listen for scroll to re-calculate stage as new text appears
+    window.addEventListener('scroll', resize, { passive: true });
+    
     resize();
 
     let startTime = performance.now();
@@ -92,9 +86,9 @@ export default function OverlayMotion({
         const duration = scene.duration || 4000;
         const progress = (elapsed % duration) / duration;
 
-        // --- 1. THE STAGE (Option B: Smart White-Space Grid) ---
+        // --- 1. THE STAGE (True White-Space Detection) ---
         ctx.save();
-        ctx.globalAlpha = 0.3; // Visible but subtle
+        ctx.globalAlpha = 0.4;
         gridCache.current.forEach(point => {
           ctx.fillStyle = '#ff4444';
           ctx.beginPath();
@@ -103,15 +97,14 @@ export default function OverlayMotion({
         });
         ctx.restore();
 
-        // --- 2. THE PATHS (Option A: Spline Navigation) ---
+        // --- 2. THE PATHS ---
         const hints = scene.layout_hints?.length ? scene.layout_hints : [{ x: 0.5, y: 0.5 }];
-
         if (hints.length > 1) {
           ctx.save();
           const pathPoints = pathFinder.generatePathPoints(hints, 60);
           ctx.beginPath();
           ctx.setLineDash([8, 12]);
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
           pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
@@ -122,25 +115,22 @@ export default function OverlayMotion({
           ctx.restore();
         }
 
-        // --- 3. THE CAST (Orchestration) ---
+        // --- 3. THE CAST ---
         const beats = scene.action_beats || [];
-        const entitiesToRender = beats.length > 0 ? beats : [{
+        const entities = beats.length > 0 ? beats : [{
           entity: 'narrator',
-          emotion: scene.emotion_curve?.primary || 'neutral',
-          action: 'narrate'
+          emotion: scene.emotion_curve?.primary || 'neutral'
         }];
 
-        entitiesToRender.forEach((beat, index) => {
+        entities.forEach((beat, index) => {
           const pathData = pathFinder.getPointOnPath(hints, progress);
-          const separation = (index - (entitiesToRender.length - 1) / 2) * 60;
+          const separation = (index - (entities.length - 1) / 2) * 70;
           
           const x = pathData.x * canvas.width + (index % 2 === 0 ? separation : -separation);
           const y = pathData.y * canvas.height;
 
-          if (isNaN(x) || isNaN(y)) return;
-
           const emojis = emotionEmojis[beat.emotion] || emotionEmojis.neutral;
-          const size = 45 + (scene.emotion_curve?.intensity || 0.5) * 25;
+          const size = 45 + (scene.emotion_curve?.intensity || 0.5) * 20;
 
           ctx.save();
           ctx.shadowBlur = 20;
@@ -148,22 +138,17 @@ export default function OverlayMotion({
           ctx.font = `${size}px serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-
-          // Entity Rendering with slight rotation based on path heading
           ctx.translate(x, y);
-          ctx.rotate(pathData.angle * 0.1); 
+          ctx.rotate(pathData.angle * 0.15);
           ctx.fillText(emojis[0], 0, 0);
-
-          // Metadata Label
-          ctx.rotate(-(pathData.angle * 0.1));
-          ctx.font = 'bold 12px sans-serif';
+          
+          ctx.rotate(-(pathData.angle * 0.15));
+          ctx.font = 'bold 11px sans-serif';
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          ctx.shadowBlur = 0;
-          ctx.fillText(`${beat.entity.toUpperCase()}`, 0, size / 1.5);
+          ctx.fillText(beat.entity.toUpperCase(), 0, size/1.5);
           ctx.restore();
         });
       }
-
       requestRef.current = requestAnimationFrame(animate);
     };
 
@@ -172,19 +157,15 @@ export default function OverlayMotion({
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       window.removeEventListener('resize', resize);
+      window.removeEventListener('scroll', resize);
     };
   }, [isActive, scene]);
 
   return (
     <canvas
       ref={canvasRef}
-      id="narrative-animation-layer"
       className="fixed inset-0 pointer-events-none"
-      style={{ 
-        zIndex: 100000, 
-        display: isActive ? 'block' : 'none',
-        background: 'transparent'
-      }}
+      style={{ zIndex: 100000, display: isActive ? 'block' : 'none' }}
     />
   );
 }
