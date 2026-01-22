@@ -28,32 +28,53 @@ export default function OverlayMotion({ isActive, scene }: OverlayMotionProps) {
   };
 
   /**
-   * REVISED STAGE DETECTION: 
-   * Uses DOM geometry to find real white space, ignoring text-heavy areas.
+   * FIXED STAGE DETECTION: 
+   * Now properly checks if canvas coordinates overlap with text elements
    */
   const updateStageGrid = (width: number, height: number) => {
     const points: GridPoint[] = [];
     const step = 45;
 
-    // 1. Find all "Blocker" elements (text, images, nav)
-    // We target common tags used in Paul Graham's essays and news sites
-    const blockers = Array.from(document.querySelectorAll('p, img, h1, h2, table, font'));
-    const blockerRects = blockers.map(el => el.getBoundingClientRect());
+    // Find all blocker elements (text, images, nav)
+    const blockers = Array.from(document.querySelectorAll('p, img, h1, h2, h3, h4, h5, h6, table, font, li, a, span, div'));
+    
+    // Filter to only elements with actual content or size
+    const blockerRects = blockers
+      .map(el => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        // Only consider visible elements with actual content
+        if (style.display === 'none' || style.visibility === 'hidden') return null;
+        if (rect.width === 0 || rect.height === 0) return null;
+        // Check if element has text content
+        const hasText = el.textContent && el.textContent.trim().length > 0;
+        const isImage = el.tagName === 'IMG';
+        if (!hasText && !isImage) return null;
+        return rect;
+      })
+      .filter(rect => rect !== null);
 
     for (let x = 0; x < width; x += step) {
       for (let y = 0; y < height; y += step) {
-        // 2. CHECK: Is this coordinate inside any text/image block?
-        const isBlocked = blockerRects.some(rect => 
-          x >= rect.left && x <= rect.right && 
-          y >= rect.top && y <= rect.bottom
-        );
+        // Check if this canvas coordinate overlaps with any text/image block
+        const isBlocked = blockerRects.some(rect => {
+          if (!rect) return false;
+          // Add small padding to avoid dots right at the edge of text
+          const padding = 10;
+          return x >= (rect.left - padding) && 
+                 x <= (rect.right + padding) && 
+                 y >= (rect.top - padding) && 
+                 y <= (rect.bottom + padding);
+        });
 
-        // 3. ONLY ADD if the point is in the "Margins" or "Gaps"
+        // Only add points in white space (not blocked)
         if (!isBlocked) {
           points.push({ x, y });
         }
       }
     }
+    
+    console.log(`Grid updated: ${points.length} white space points found out of ${(width/step) * (height/step)} total`);
     gridCache.current = points;
   };
 
