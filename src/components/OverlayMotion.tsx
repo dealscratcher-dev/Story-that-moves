@@ -20,14 +20,15 @@ export default function OverlayMotion({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number>();
 
-  // Updated Mapping: Added 'fear' to match your MongoDB data
+  // Updated Mapping: Added direct matches for MongoDB emotion keys
   const emotionEmojis: Record<string, string[]> = {
-    fear: ['😨', '😰', '👻', '😱'], // This maps to your "primary": "fear"
+    fear: ['😨', '😰', '😱'],      //
+    joy: ['☀️', '🌸', '🎈'],       // Added for MongoDB 'joy'
+    anger: ['😡', '🔥', '💢'],     // Added for MongoDB 'anger'
+    sadness: ['💧', '🌧️', '🌑'],   // Added for MongoDB 'sadness'
     calm: ['🌊', '🍃', '☁️'],
     tense: ['⚡', '🔥', '💥'],
     exciting: ['✨', '🚀', '🎉'],
-    sad: ['💧', '🌧️', '🌑'],
-    joyful: ['☀️', '🌸', '🎈'],
     mysterious: ['🔮', '🌌', '👁️'],
     neutral: ['⚪', '🌫️', '💠']
   };
@@ -52,34 +53,63 @@ export default function OverlayMotion({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (isActive && scene) {
-        // Correctly drill into the nested emotion_curve from your DB
+        // 1. Extract Data from Scene
         const activeEmotion = scene.emotion_curve?.primary || 'neutral';
         const activeIntensity = scene.emotion_curve?.intensity || 0.5;
-        
-        const elapsed = time - startTime;
-        const duration = scene.duration || 4000;
-        const progress = (elapsed % duration) / duration;
-
-        // Pathfinding
         const hints = scene.layout_hints && scene.layout_hints.length > 0 
           ? scene.layout_hints 
           : [{ x: 0.5, y: 0.5 }];
           
+        const elapsed = time - startTime;
+        const duration = scene.duration || 4000;
+        const progress = (elapsed % duration) / duration;
+
+        // 2. PATH VISUALIZATION (Debugging Layer)
+        if (hints.length > 1) {
+          ctx.save();
+          // Draw the smooth spline path
+          const pathPoints = pathFinder.generatePathPoints(hints, 100);
+          ctx.beginPath();
+          ctx.setLineDash([5, 8]); // Dashed line
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)'; // Faint gray
+          ctx.lineWidth = 1.5;
+
+          pathPoints.forEach((p, index) => {
+            const px = p.x * canvas.width;
+            const py = p.y * canvas.height;
+            if (index === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+
+          // Draw "Heat Map" dots for actual layout_hints in DB
+          hints.forEach(hint => {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // Transparent red
+            ctx.beginPath();
+            ctx.arc(hint.x * canvas.width, hint.y * canvas.height, 4, 0, Math.PI * 2);
+            ctx.fill();
+          });
+          ctx.restore();
+        }
+
+        // 3. CALCULATE CURRENT EMOJI POSITION
         const pos = pathFinder.getPointOnPath(hints, progress);
         const x = pos.x * canvas.width;
         const y = pos.y * canvas.height;
 
-        // Drawing
+        // 4. DRAW EMOJI
         const emojis = emotionEmojis[activeEmotion] || emotionEmojis.neutral;
         ctx.save();
         
-        // Scale and Shadow for visibility over the iframe
+        // Dynamic sizing based on intensity
         const size = 50 + (activeIntensity * 25);
         ctx.font = `${size}px serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        
+        // Add halo/glow for readability over dark text
         ctx.shadowBlur = 20;
-        ctx.shadowColor = 'white'; // Creates a "halo" so it's visible on black text
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
 
         if (!isNaN(x) && !isNaN(y)) {
           ctx.fillText(emojis[0], x, y);
@@ -107,8 +137,8 @@ export default function OverlayMotion({
         zIndex: 99999, 
         display: isActive ? 'block' : 'none',
         background: 'transparent',
-        // This filter helps the emoji pop against the white article background
-        filter: 'drop-shadow(0px 0px 10px rgba(255,255,255,0.8))' 
+        // Enhances visibility of the animation layer over the iframe content
+        filter: 'drop-shadow(0px 0px 8px rgba(255,255,255,0.6))' 
       }}
     />
   );
