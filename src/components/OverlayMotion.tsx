@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { MotionType, StoryboardScene } from '../types/storyboard';
 import { pathFinder } from '../utils/pathFinder';
 
@@ -13,7 +13,6 @@ interface OverlayMotionProps {
 interface GridPoint {
   x: number;
   y: number;
-  isAllowed: boolean;
 }
 
 export default function OverlayMotion({ 
@@ -35,27 +34,30 @@ export default function OverlayMotion({
     neutral: ['⚪', '🌫️', '💠']
   };
 
-  // Generate the stage map: Only marks "white space" as valid dots
+  /**
+   * PROBE LOGIC: Scans the underlying page to find white space.
+   * This ensures red dots don't cover text as seen in your conceptual goal.
+   */
   const updateStageGrid = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const points: GridPoint[] = [];
-    const step = 45; // Density of the red dot grid
+    const step = 45; // Density of the stage grid
 
-    // We temporarily read the background
-    // Note: This requires the iframe/page background to be accessible
     for (let x = 0; x < width; x += step) {
       for (let y = 0; y < height; y += step) {
         try {
+          // Probe the background color at this coordinate
           const pixel = ctx.getImageData(x, y, 1, 1).data;
-          // Check if pixel is white (RGB > 240) or transparent (Alpha close to 0)
-          const isWhite = pixel[0] > 240 && pixel[1] > 240 && pixel[2] > 240;
-          const isTransparent = pixel[3] < 10;
           
+          // Detect white space: RGB values above 245
+          const isWhite = pixel[0] > 245 && pixel[1] > 245 && pixel[2] > 245;
+          const isTransparent = pixel[3] < 10;
+
           if (isWhite || isTransparent) {
-            points.push({ x, y, isAllowed: true });
+            points.push({ x, y });
           }
         } catch (e) {
-          // Fallback if cross-origin prevents pixel reading: draw full grid
-          points.push({ x, y, isAllowed: true });
+          // Fallback if cross-origin restricts pixel access
+          points.push({ x, y });
         }
       }
     }
@@ -65,6 +67,8 @@ export default function OverlayMotion({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
+    // willReadFrequently optimizes the getImageData calls
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
@@ -88,9 +92,9 @@ export default function OverlayMotion({
         const duration = scene.duration || 4000;
         const progress = (elapsed % duration) / duration;
 
-        // --- 1. THE STAGE (Option B: Red Dot White-Space Grid) ---
+        // --- 1. THE STAGE (Option B: Smart White-Space Grid) ---
         ctx.save();
-        ctx.globalAlpha = 0.4;
+        ctx.globalAlpha = 0.3; // Visible but subtle
         gridCache.current.forEach(point => {
           ctx.fillStyle = '#ff4444';
           ctx.beginPath();
@@ -107,7 +111,7 @@ export default function OverlayMotion({
           const pathPoints = pathFinder.generatePathPoints(hints, 60);
           ctx.beginPath();
           ctx.setLineDash([8, 12]);
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
           pathPoints.forEach((p, i) => {
             const px = p.x * canvas.width;
             const py = p.y * canvas.height;
@@ -119,24 +123,24 @@ export default function OverlayMotion({
         }
 
         // --- 3. THE CAST (Orchestration) ---
-        const beats = scene.action_beats?.length ? scene.action_beats : [{
+        const beats = scene.action_beats || [];
+        const entitiesToRender = beats.length > 0 ? beats : [{
           entity: 'narrator',
           emotion: scene.emotion_curve?.primary || 'neutral',
           action: 'narrate'
         }];
 
-        beats.forEach((beat, index) => {
-          const basePos = pathFinder.getPointOnPath(hints, progress);
-          const separation = (index - (beats.length - 1) / 2) * 70;
+        entitiesToRender.forEach((beat, index) => {
+          const pathData = pathFinder.getPointOnPath(hints, progress);
+          const separation = (index - (entitiesToRender.length - 1) / 2) * 60;
           
-          // Entites move on the grid
-          const x = basePos.x * canvas.width + (index % 2 === 0 ? separation : -separation);
-          const y = basePos.y * canvas.height;
+          const x = pathData.x * canvas.width + (index % 2 === 0 ? separation : -separation);
+          const y = pathData.y * canvas.height;
 
           if (isNaN(x) || isNaN(y)) return;
 
           const emojis = emotionEmojis[beat.emotion] || emotionEmojis.neutral;
-          const size = 50 + (scene.emotion_curve?.intensity || 0.5) * 20;
+          const size = 45 + (scene.emotion_curve?.intensity || 0.5) * 25;
 
           ctx.save();
           ctx.shadowBlur = 20;
@@ -145,16 +149,17 @@ export default function OverlayMotion({
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
 
-          // Entity rotation based on spline heading
+          // Entity Rendering with slight rotation based on path heading
           ctx.translate(x, y);
-          ctx.rotate(basePos.angle * 0.2); // Subtle tilt toward direction
+          ctx.rotate(pathData.angle * 0.1); 
           ctx.fillText(emojis[0], 0, 0);
 
-          // Label
-          ctx.rotate(-(basePos.angle * 0.2));
+          // Metadata Label
+          ctx.rotate(-(pathData.angle * 0.1));
           ctx.font = 'bold 12px sans-serif';
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          ctx.fillText(beat.entity.toUpperCase(), 0, size / 1.5);
+          ctx.shadowBlur = 0;
+          ctx.fillText(`${beat.entity.toUpperCase()}`, 0, size / 1.5);
           ctx.restore();
         });
       }
@@ -176,7 +181,7 @@ export default function OverlayMotion({
       id="narrative-animation-layer"
       className="fixed inset-0 pointer-events-none"
       style={{ 
-        zIndex: 100000,
+        zIndex: 100000, 
         display: isActive ? 'block' : 'none',
         background: 'transparent'
       }}
